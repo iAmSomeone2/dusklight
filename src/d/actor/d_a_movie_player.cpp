@@ -53,6 +53,74 @@ inline s32 daMP_NEXT_READ_SIZE(daMP_THPReadBuffer* readBuf) {
 extern "C" {
 #endif
 
+#if TARGET_PC
+static u32 THPAudioDecode(s16* audioBuffer, u8* audioFrame, s32 flag) {
+    // Exit early if either ptr is null.
+    if (audioBuffer == nullptr || audioFrame == nullptr) {
+        return 0;
+    }
+
+    const auto header = reinterpret_cast<const THPAudioRecordHeader*>(audioFrame);
+    // Get pointers to the start of the left and right channel data blocks, respectively
+    const auto leftChannel = audioFrame + sizeof(THPAudioRecordHeader);
+    const auto rightChannel = leftChannel + header->offsetNextChannel;
+
+    // Determine decode data ptrs and step size depending on the value of `flag`
+    const auto decRightPtr = audioBuffer;
+    auto decLeftPtr = decRightPtr + header->sampleSize;
+    s32 step = 1;
+    if (flag != 1) {
+        decLeftPtr = decRightPtr + 1;
+        step = 2;
+    }
+
+    auto decodeNextSample = [header, step](const u8* channelData, s16* mainDataPtr,
+                                const bool isRight = false, s16* optDataPtr = nullptr) {
+        static constexpr long int i32Max = 2147483647;
+        static constexpr long int i32Min = -2147483648;
+
+        // Init decode info
+        THPAudioDecodeInfo decInfo;
+        __THPAudioInitialize(&decInfo, const_cast<u8*>(channelData));
+
+        auto yn1 = isRight ? header->rYn1 : header->lYn1;
+        auto yn2 = isRight ? header->rYn2 : header->lYn2;
+        const auto coef = isRight ? header->rCoef : header->lCoef;
+
+        for (auto i = 0; i < header->sampleSize; i++) {
+            const auto sample = __THPAudioGetNewSample(&decInfo);
+            auto yn = coef[decInfo.predictor][1] * yn2;
+            yn += coef[decInfo.predictor][0] * yn1;
+            yn += (sample << decInfo.scale) << 11;
+            yn <<= 5;
+
+            if (const u16 temp = yn & 0xffff; temp > 0x8000 || (temp == 0x8000 && yn & 0x10000)) {
+                yn += 0x10000;
+            }
+
+            yn = static_cast<int>(std::clamp(static_cast<long int>(yn), i32Min, i32Max));
+
+            *mainDataPtr = static_cast<s16>(yn >> 16);
+            mainDataPtr += step;
+            if (optDataPtr != nullptr) {
+                *optDataPtr = static_cast<s16>(yn >> 16);
+                optDataPtr += step;
+            }
+            yn2 = yn1;
+            yn1 = static_cast<s16>(yn >> 16);
+        }
+    };
+
+    if (header->offsetNextChannel == 0) {
+        decodeNextSample(leftChannel, decLeftPtr, decRightPtr);
+    } else {
+        decodeNextSample(leftChannel, decLeftPtr);
+        decodeNextSample(rightChannel, decRightPtr, true);
+    }
+
+    return header->sampleSize;
+}
+#else
 static u32 THPAudioDecode(s16* audioBuffer, u8* audioFrame, s32 flag) {
     THPAudioRecordHeader* header;
     THPAudioDecodeInfo decInfo;
@@ -187,6 +255,7 @@ static u32 THPAudioDecode(s16* audioBuffer, u8* audioFrame, s32 flag) {
 
     return header->sampleSize;
 }
+#endif
 
 static s32 __THPAudioGetNewSample(THPAudioDecodeInfo* info) {
     s32 sample;
