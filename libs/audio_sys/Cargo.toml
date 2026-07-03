@@ -4,12 +4,20 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["staticlib"]
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+panic="abort"
 
 [build-dependencies]
 cbindgen = "0.29.4"
 
 [dependencies]
+bytemuck = "1.25.0"
+num = "0.4.3"
 
 [dependencies.sdl3-sys]
 version = "0.6.7"
