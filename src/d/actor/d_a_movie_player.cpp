@@ -24,6 +24,7 @@
 
 #include <cassert>
 
+#include "../../../../../.local/vitasdk/arm-vita-eabi/include/c++/15.2.0/iostream"
 #include "f_op/f_op_overlap_mng.h"
 
 #include "JSystem/JAudio2/JASCriticalSection.h"
@@ -35,6 +36,10 @@
 #if MOVIE_SUPPORT
 #include "turbojpeg.h"
 #endif
+#endif
+
+#if DUSK_IN_DEV
+#include <limits>
 #endif
 
 inline s32 daMP_NEXT_READ_SIZE(daMP_THPReadBuffer* readBuf) {
@@ -53,10 +58,41 @@ inline s32 daMP_NEXT_READ_SIZE(daMP_THPReadBuffer* readBuf) {
 extern "C" {
 #endif
 
-#if TARGET_PC
-static u32 THPAudioDecode(s16* audioBuffer, u8* audioFrame, s32 flag) {
+#if DUSK_IN_DEV
+THPAudioDecodeInfo::THPAudioDecodeInfo(const u8* ptr) {
+    this->encodeData = ptr;
+    this->offsetNibbles = 2;
+
+    this->predictor = static_cast<u8>((*this->encodeData & 0x70) >> 4);
+    this->scale = static_cast<u8>(*this->encodeData & 0xF);
+
+    this->encodeData++;
+}
+
+[[nodiscard]] s32 THPAudioDecodeInfo::getNextSample() {
+    s32 sample;
+
+    if (!(this->offsetNibbles & 0x0f)) {
+        this->predictor = static_cast<u8>((*this->encodeData & 0x70) >> 4);
+        this->scale = static_cast<u8>(*this->encodeData & 0xF);
+        this->encodeData++;
+        this->offsetNibbles += 2;
+    }
+
+    if (this->offsetNibbles & 0x1) {
+        sample = ((*this->encodeData & 0xF) << 28) >> 28;
+        this->encodeData++;
+    } else {
+        sample = ((*this->encodeData & 0xF0) << 24) >> 28;
+    }
+
+    this->offsetNibbles++;
+    return sample;
+}
+
+[[nodiscard]] static u32 THPAudioDecode(s16* outputBuffer, const u8* audioFrame, const s32 flag) {
     // Exit early if either ptr is null.
-    if (audioBuffer == nullptr || audioFrame == nullptr) {
+    if (outputBuffer == nullptr || audioFrame == nullptr) {
         return 0;
     }
 
@@ -66,7 +102,7 @@ static u32 THPAudioDecode(s16* audioBuffer, u8* audioFrame, s32 flag) {
     const auto rightChannel = leftChannel + header->offsetNextChannel;
 
     // Determine decode data ptrs and step size depending on the value of `flag`
-    const auto decRightPtr = audioBuffer;
+    const auto decRightPtr = outputBuffer;
     auto decLeftPtr = decRightPtr + header->sampleSize;
     s32 step = 1;
     if (flag != 1) {
@@ -74,21 +110,20 @@ static u32 THPAudioDecode(s16* audioBuffer, u8* audioFrame, s32 flag) {
         step = 2;
     }
 
-    auto decodeNextSample = [header, step](const u8* channelData, s16* mainDataPtr,
-                                const bool isRight = false, s16* optDataPtr = nullptr) {
-        static constexpr long int i32Max = 2147483647;
-        static constexpr long int i32Min = -2147483648;
+    auto decodeNextSample = [&header, step](const u8* channelData, s16* mainDataPtr,
+                                const bool isRightChannel = false, s16* optDataPtr = nullptr) {
+        constexpr long int i32Max = std::numeric_limits<s32>::max();
+        constexpr long int i32Min = std::numeric_limits<s32>::min();
 
         // Init decode info
-        THPAudioDecodeInfo decInfo;
-        __THPAudioInitialize(&decInfo, const_cast<u8*>(channelData));
+        auto decInfo = THPAudioDecodeInfo(channelData);
 
-        auto yn1 = isRight ? header->rYn1 : header->lYn1;
-        auto yn2 = isRight ? header->rYn2 : header->lYn2;
-        const auto coef = isRight ? header->rCoef : header->lCoef;
+        auto yn1 = isRightChannel ? header->rYn1 : header->lYn1;
+        auto yn2 = isRightChannel ? header->rYn2 : header->lYn2;
+        const auto coef = isRightChannel ? header->rCoef : header->lCoef;
 
         for (auto i = 0; i < header->sampleSize; i++) {
-            const auto sample = __THPAudioGetNewSample(&decInfo);
+            const auto sample = decInfo.getNextSample();
             auto yn = coef[decInfo.predictor][1] * yn2;
             yn += coef[decInfo.predictor][0] * yn1;
             yn += (sample << decInfo.scale) << 11;
@@ -98,7 +133,7 @@ static u32 THPAudioDecode(s16* audioBuffer, u8* audioFrame, s32 flag) {
                 yn += 0x10000;
             }
 
-            yn = static_cast<int>(std::clamp(static_cast<long int>(yn), i32Min, i32Max));
+            yn = static_cast<s32>(std::clamp(static_cast<s64>(yn), i32Min, i32Max));
 
             *mainDataPtr = static_cast<s16>(yn >> 16);
             mainDataPtr += step;
@@ -112,7 +147,7 @@ static u32 THPAudioDecode(s16* audioBuffer, u8* audioFrame, s32 flag) {
     };
 
     if (header->offsetNextChannel == 0) {
-        decodeNextSample(leftChannel, decLeftPtr, decRightPtr);
+        decodeNextSample(leftChannel, decLeftPtr, false, decRightPtr);
     } else {
         decodeNextSample(leftChannel, decLeftPtr);
         decodeNextSample(rightChannel, decRightPtr, true);
@@ -257,6 +292,7 @@ static u32 THPAudioDecode(s16* audioBuffer, u8* audioFrame, s32 flag) {
 }
 #endif
 
+#if !DUSK_IN_DEV
 static s32 __THPAudioGetNewSample(THPAudioDecodeInfo* info) {
     s32 sample;
 
@@ -285,6 +321,7 @@ static void __THPAudioInitialize(THPAudioDecodeInfo* info, u8* ptr) {
     info->scale = (u8)((*(info->encodeData) & 0xF));
     info->encodeData++;
 }
+#endif
 
 #if !TARGET_PC
 static u8 THPStatistics[1120] ATTRIBUTE_ALIGN(32);
@@ -3332,9 +3369,16 @@ static void* daMP_AudioDecoderForOnMemory(void* param_0) {
     return nullptr;
 }
 
-static OSMessage daMP_FreeAudioBufferMessage[3];
+#if TARGET_PC && DUSK_IN_DEV
+// Testing if increasing the queue size helps with audio crackling
+static constexpr int AUDIO_BUF_MSG_COUNT = 6;
+#else
+static constexpr int AUDIO_BUF_MSG_COUNT = 3;
+#endif
 
-static OSMessage daMP_DecodedAudioBufferMessage[3];
+static OSMessage daMP_FreeAudioBufferMessage[AUDIO_BUF_MSG_COUNT];
+
+static OSMessage daMP_DecodedAudioBufferMessage[AUDIO_BUF_MSG_COUNT];
 
 static BOOL daMP_CreateAudioDecodeThread(OSPriority prio, u8* param_1) {
 #if TARGET_PC
@@ -3352,8 +3396,8 @@ static BOOL daMP_CreateAudioDecodeThread(OSPriority prio, u8* param_1) {
         }
     }
 
-    OSInitMessageQueue(&daMP_FreeAudioBufferQueue, daMP_FreeAudioBufferMessage, 3);
-    OSInitMessageQueue(&daMP_DecodedAudioBufferQueue, daMP_DecodedAudioBufferMessage, 3);
+    OSInitMessageQueue(&daMP_FreeAudioBufferQueue, daMP_FreeAudioBufferMessage, AUDIO_BUF_MSG_COUNT);
+    OSInitMessageQueue(&daMP_DecodedAudioBufferQueue, daMP_DecodedAudioBufferMessage, AUDIO_BUF_MSG_COUNT);
 
     daMP_AudioDecodeThreadCreated = TRUE;
     return TRUE;
@@ -3822,6 +3866,12 @@ static BOOL daMP_THPPlayerOpen(char const* filename, BOOL onMemory) {
             }
 
             memcpy(&daMP_ActivePlayer.audioInfo, daMP_WorkBuffer, sizeof(THPAudioInfo));
+#if DUSK_IN_DEV
+            std::cout << "Audio stream info:\n";
+            std::cout << "  channels:\t" << daMP_ActivePlayer.audioInfo.sndChannels << std::endl;
+            std::cout << "  frequency:\t" << daMP_ActivePlayer.audioInfo.sndFrequency << std::endl;
+            std::cout << "  samples:\t" << daMP_ActivePlayer.audioInfo.sndNumSamples << std::endl;
+#endif
             daMP_ActivePlayer.audioExist = 1;
             offset += sizeof(THPAudioInfo);
             break;
@@ -3983,8 +4033,7 @@ static BOOL daMP_ProperTimingForGettingNextFrame() {
 		}
 	} else {
 #if TARGET_PC
-		const f32 fps = daMP_ActivePlayer.header.frameRate;
-		if (fps > 0.0f) {
+        if (const f32 fps = daMP_ActivePlayer.header.frameRate; fps > 0.0f) {
 			const f32 elapsed = std::chrono::duration<f32>(
 			    std::chrono::steady_clock::now() - daMP_ActivePlayer.thpPlaybackClock).count();
 			const s32 desired = static_cast<s32>(elapsed * fps);
@@ -4442,14 +4491,14 @@ static void daMP_ActivePlayer_Main() {
     }
 }
 
-#if TARGET_PC && 0
+#if TARGET_PC
 #include "imgui.h"
 #endif
 
 static void daMP_ActivePlayer_Draw() {
 #if TARGET_PC
-    u16 width = JUTVideo::getManager()->getFbWidth();
-    u16 height = JUTVideo::getManager()->getEfbHeight();
+    const u16 width = JUTVideo::getManager()->getFbWidth();
+    const u16 height = JUTVideo::getManager()->getEfbHeight();
 
     const auto rect = dusk::LayoutRect::FitRectInRect(
         width,
@@ -4480,7 +4529,7 @@ static void daMP_ActivePlayer_Draw() {
         daMP_c::daMP_c_Set_PercentMovieVolume(0.0f);
     }
 
-#if TARGET_PC && 0
+#if TARGET_PC
     if (ImGui::Begin("Movie player")) {
         ImGui::Text("daMP_ReadedBufferQueue: %d", daMP_ReadedBufferQueue.usedCount);
         ImGui::Text("daMP_ReadedBufferQueue2: %d", daMP_ReadedBufferQueue2.usedCount);

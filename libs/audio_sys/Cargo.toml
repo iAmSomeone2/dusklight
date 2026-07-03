@@ -1,0 +1,16 @@
+[package]
+name = "audio_sys"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[build-dependencies]
+cbindgen = "0.29.4"
+
+[dependencies]
+
+[dependencies.sdl3-sys]
+version = "0.6.7"
+features = ["no-default-subsystems", "sdl-audio"]

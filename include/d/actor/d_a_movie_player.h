@@ -31,6 +31,7 @@ typedef struct THPAudioRecordHeader {
     BE(s16) rYn2;
 } THPAudioRecordHeader;
 
+#if !DUSK_IN_DEV
 typedef struct THPAudioDecodeInfo {
     u8* encodeData;
     u32 offsetNibbles;
@@ -39,6 +40,7 @@ typedef struct THPAudioDecodeInfo {
     s16 yn1;
     s16 yn2;
 } THPAudioDecodeInfo;
+#endif
 
 typedef struct THPTextureSet {
 	u8* ytexture;
@@ -86,9 +88,28 @@ typedef struct THPHeader {
 	/* 0x2C */ BE(u32) finalFrameDataOffsets;
 } THPHeader;
 
+#if DUSK_IN_DEV
+struct THPAudioDecodeInfo {
+    const u8* encodeData;
+    u32 offsetNibbles;
+    u8 predictor;
+    u8 scale;
+
+    explicit THPAudioDecodeInfo(const u8* ptr);
+
+    /**
+     * Get the next encoded audio sample.
+     * @return Signed 32-bit audio sample value
+     */
+    s32 getNextSample();
+};
+
+static u32 THPAudioDecode(s16* outputBuffer, const u8* audioFrame, s32 flag);
+#else
 static u32 THPAudioDecode(s16* audioBuffer, u8* audioFrame, s32 flag);
 static s32 __THPAudioGetNewSample(THPAudioDecodeInfo* info);
 static void __THPAudioInitialize(THPAudioDecodeInfo* info, u8* ptr);
+#endif // DUSK_IN_DEV
 
 #define THP_AUDIO_BUFFER_COUNT 3
 #define THP_READ_BUFFER_COUNT  10

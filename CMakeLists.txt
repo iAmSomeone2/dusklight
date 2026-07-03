@@ -180,6 +180,8 @@ option(DUSK_GFX_DEBUG_GROUPS "Report debug groups to the native graphics API" ${
 set(DUSK_SENTRY_DSN "" CACHE STRING "Sentry DSN")
 set(DUSK_SENTRY_ENVIRONMENT "development" CACHE STRING "Sentry environment")
 
+option(DUSK_IN_DEV "Enable in-development changes and features (off by default)" OFF)
+
 # Edit & Continue
 if (MSVC)
     if ("${CMAKE_MSVC_DEBUG_INFORMATION_FORMAT}" STREQUAL "" AND CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -364,6 +366,11 @@ source_group("dolzel" FILES ${DOLZEL_FILES} ${Z2AUDIOLIB_FILES} ${REL_FILES})
 source_group("dusklight" FILES ${DUSK_FILES} ${DUSK_HTTP_BACKEND_FILES})
 
 set(GAME_COMPILE_DEFS TARGET_PC WIDESCREEN_SUPPORT=1 AVOID_UB=1 VERSION=0 MTX_USE_PS=1)
+
+if (DUSK_IN_DEV)
+    message(STATUS "dusklight: Enabling support for in-dev features.")
+    list(APPEND GAME_COMPILE_DEFS DUSK_IN_DEV=1)
+endif ()
 
 set(GAME_INCLUDE_DIRS
     include

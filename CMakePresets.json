@@ -11,7 +11,11 @@
       "hidden": true,
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDebugDLL"
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDebugDLL",
+        "DUSK_IN_DEV": {
+          "type": "BOOL",
+          "value": true
+        }
       }
     },
     {
