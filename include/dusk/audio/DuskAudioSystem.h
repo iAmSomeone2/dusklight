@@ -28,4 +28,9 @@ namespace dusk::audio {
     u32 GetResetCount(int channelIdx);
 
     f32 VolumeFromU16(u16 value);
+
+    /**
+     * Shut down the audio system and stop playing audio.
+     */
+    void Shutdown();
 }

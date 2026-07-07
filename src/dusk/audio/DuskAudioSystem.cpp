@@ -4,6 +4,7 @@
 #include <array>
 #include <cassert>
 #include <span>
+#include <thread>
 
 #include "JSystem/JAudio2/JASAiCtrl.h"
 #include "JSystem/JAudio2/JASChannel.h"
@@ -23,6 +24,16 @@ static std::array<f32, DSP_SUBFRAME_SIZE * OutputSubframe::NUM_CHANNELS> OutInte
 
 static SDL_AudioStream* PlaybackStream;
 
+/// Number of audio frames that should be queued in SDL3's buffer. The more frames queued, the less likely audio underruns will occur, but the more latency there will be between the game and the audio output.
+constexpr size_t TARGET_QUEUED_FRAMES = 2;
+constexpr size_t SAMPLE_SIZE = OutputSubframe::NUM_CHANNELS  * sizeof(f32);
+constexpr size_t BYTES_PER_SUBFRAME = DSP_SUBFRAME_SIZE * SAMPLE_SIZE;
+constexpr size_t TARGET_QUEUED_BYTES = TARGET_QUEUED_FRAMES * DSP_SUBFRAME_SIZE * SAMPLE_SIZE;
+/// Background thread that renders audio frames and outputs them to SDL3. This is used to avoid blocking the main thread when rendering audio, which can cause stuttering if the main thread is busy with other work.
+static std::thread AudioRenderThread;
+static std::atomic_bool AudioRenderThreadRunning = true;
+static auto AudioRenderThreadSemaphore = std::unique_ptr<SDL_Semaphore, decltype(&SDL_DestroySemaphore)>(SDL_CreateSemaphore(1), &SDL_DestroySemaphore);
+
 /**
  * SDL audiostream callback to trigger rendering of new audio data.
  */
@@ -37,12 +48,24 @@ static void SDLCALL GetNewAudio(
  * Note: "audio frames" are unrelated to video frames.
  * @return Amount of audio samples rendered.
  */
-static int RenderNewAudioFrame();
+static size_t RenderNewAudioFrame();
 
 /**
  * Render an audio subframe and output it to SDL3.
  */
 static void RenderAudioSubframe();
+
+void RenderAudioWorker() {
+    const auto target_subframes = JASDriver::sSubFrames * TARGET_QUEUED_FRAMES;
+    const auto target_queued_bytes = target_subframes * DSP_SUBFRAME_SIZE * OutputSubframe::NUM_CHANNELS * sizeof(f32);
+
+    while (AudioRenderThreadRunning.load(std::memory_order_relaxed)) {
+        SDL_WaitSemaphoreTimeout(AudioRenderThreadSemaphore.get(), 1);
+        while(SDL_GetAudioStreamQueued(PlaybackStream) < target_queued_bytes) {
+            const size_t rendered_samples = RenderNewAudioFrame();
+        }
+    }
+}
 
 static void InitSDL3Output() {
     SDL_Init(SDL_INIT_AUDIO);
@@ -52,10 +75,11 @@ static void InitSDL3Output() {
         2,
         SampleRate,
     };
+
     PlaybackStream = SDL_OpenAudioDeviceStream(
         SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
         &spec,
-        &GetNewAudio,
+        [](void*, SDL_AudioStream*, int, int) { SDL_SignalSemaphore(AudioRenderThreadSemaphore.get()); },
         nullptr);
 }
 
@@ -67,6 +91,8 @@ void dusk::audio::Initialize() {
     JASDSPChannel::initAll();
 
     JASPoolAllocObject_MultiThreaded<JASChannel>::newMemPool(0x48);
+
+    AudioRenderThread = std::thread(RenderAudioWorker);
 
     SDL_ResumeAudioStreamDevice(PlaybackStream);
 }
@@ -102,13 +128,14 @@ void SDLCALL GetNewAudio(
     int) {
     FrameMarkStart(FrameName);
     while (needed > 0) {
-        const int rendered = RenderNewAudioFrame();
-        needed -= rendered;
+        const size_t rendered_samples = RenderNewAudioFrame();
+        const size_t rendered_bytes = rendered_samples * SAMPLE_SIZE;
+        needed -= rendered_samples;
     }
     FrameMarkEnd(FrameName);
 }
 
-int RenderNewAudioFrame() {
+size_t RenderNewAudioFrame() {
     ZoneScoped;
     JASCriticalSection section;
     const u32 countSubframes = JASDriver::getSubFrames();
@@ -167,4 +194,12 @@ u32 dusk::audio::GetResetCount(int channelIdx) {
 
 f32 dusk::audio::VolumeFromU16(u16 value) {
     return static_cast<f32>(value) / static_cast<f32>(JASDriver::getChannelLevel_dsp());
+}
+
+void dusk::audio::Shutdown() {
+    AudioRenderThreadRunning.store(false, std::memory_order_relaxed);
+    if (AudioRenderThread.joinable()) {
+        AudioRenderThread.join();
+    }
+    SDL_DestroyAudioStream(PlaybackStream);
 }

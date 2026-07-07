@@ -792,6 +792,8 @@ int game_main(int argc, char* argv[]) {
 
     dusk::MoviePlayerShutdown();
 
+    dusk::audio::Shutdown();
+
     dusk::crash_reporting::shutdown();
     dusk::ShutdownFileLogging();
     fflush(stdout);
