@@ -2,8 +2,11 @@
 
 #include <SDL3/SDL_init.h>
 #include <array>
+#include <atomic>
 #include <cassert>
+#include <chrono>
 #include <span>
+#include <thread>
 
 #include "JSystem/JAudio2/JASAiCtrl.h"
 #include "JSystem/JAudio2/JASChannel.h"
@@ -14,6 +17,7 @@
 #include "DuskDsp.hpp"
 #include "JSystem/JAudio2/JASAudioThread.h"
 #include "JSystem/JAudio2/JASDriverIF.h"
+#include "dusk/os.h"
 #include "tracy/Tracy.hpp"
 
 using namespace dusk::audio;
@@ -23,14 +27,30 @@ static std::array<f32, DSP_SUBFRAME_SIZE * OutputSubframe::NUM_CHANNELS> OutInte
 
 static SDL_AudioStream* PlaybackStream;
 
+// Audio is rendered on a dedicated thread and pushed into PlaybackStream ahead of
+// playback, instead of being rendered on demand from SDL's real-time device thread.
+//
+// Rendering takes gAudioThreadMutex (JASCriticalSection) for a whole frame, and the
+// main game thread takes the same lock for most sound operations (Z2AudioCS, JASCmdStack,
+// heap work, ...). When rendering happened inside the SDL callback, any main-thread hold
+// at refill time blocked the device thread past its deadline and caused audible dropouts
+// (most noticeably THP movie-audio crackle). With a queued cushion, a lock stall only
+// delays the render thread, and the device keeps draining already-queued samples.
+static std::thread RenderThread;
+static std::atomic<bool> RenderThreadRunning{false};
+
 /**
- * SDL audiostream callback to trigger rendering of new audio data.
+ * Number of full JAS audio frames to keep queued in PlaybackStream.
+ * One frame is JASDriver::getSubFrames() subframes of DSP_SUBFRAME_SIZE samples
+ * (7 * 80 = 560 samples = 17.5ms at 32kHz on GCN settings), so this cushion can
+ * absorb lock stalls of up to ~one frame at the cost of one frame of latency.
  */
-static void SDLCALL GetNewAudio(
-    void*,
-    SDL_AudioStream*,
-    int needed,
-    int);
+static constexpr u32 TARGET_QUEUED_FRAMES = 2;
+
+/**
+ * Render thread entry: keeps PlaybackStream topped up to TARGET_QUEUED_FRAMES.
+ */
+static void RenderThreadMain();
 
 /**
  * Render an entire new frame of audio and output it to SDL3.
@@ -55,7 +75,7 @@ static void InitSDL3Output() {
     PlaybackStream = SDL_OpenAudioDeviceStream(
         SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
         &spec,
-        &GetNewAudio,
+        nullptr,
         nullptr);
 }
 
@@ -69,6 +89,19 @@ void dusk::audio::Initialize() {
     JASPoolAllocObject_MultiThreaded<JASChannel>::newMemPool(0x48);
 
     SDL_ResumeAudioStreamDevice(PlaybackStream);
+
+    RenderThreadRunning.store(true, std::memory_order_relaxed);
+    RenderThread = std::thread(RenderThreadMain);
+}
+
+void dusk::audio::Shutdown() {
+    if (!RenderThreadRunning.exchange(false, std::memory_order_relaxed)) {
+        return;
+    }
+    if (RenderThread.joinable()) {
+        RenderThread.join();
+    }
+    SDL_PauseAudioStreamDevice(PlaybackStream);
 }
 
 void dusk::audio::SetMasterVolume(const f32 value) {
@@ -92,20 +125,25 @@ void dusk::audio::SetEnableReverb(const bool value) {
 }
 
 #ifdef TRACY_ENABLE
-static auto FrameName = "GetNewAudio";
+static auto FrameName = "RenderAudioFrame";
 #endif
 
-void SDLCALL GetNewAudio(
-    void*,
-    SDL_AudioStream*,
-    int needed,
-    int) {
-    FrameMarkStart(FrameName);
-    while (needed > 0) {
-        const int rendered = RenderNewAudioFrame();
-        needed -= rendered;
+static void RenderThreadMain() {
+    OSSetCurrentThreadName("dusk audio render");
+
+    while (RenderThreadRunning.load(std::memory_order_relaxed)) {
+        // getSubFrames() can change with the output mode, so compute the target each pass.
+        const u32 targetBytes = TARGET_QUEUED_FRAMES * JASDriver::getSubFrames() *
+                                DSP_SUBFRAME_SIZE * OutputSubframe::NUM_CHANNELS * sizeof(f32);
+
+        if (static_cast<u32>(SDL_GetAudioStreamQueued(PlaybackStream)) < targetBytes) {
+            FrameMarkStart(FrameName);
+            RenderNewAudioFrame();
+            FrameMarkEnd(FrameName);
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     }
-    FrameMarkEnd(FrameName);
 }
 
 int RenderNewAudioFrame() {

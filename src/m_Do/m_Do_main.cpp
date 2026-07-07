@@ -799,6 +799,9 @@ int game_main(int argc, char* argv[]) {
 
     dusk::MoviePlayerShutdown();
 
+    // Stop the audio render thread before tearing down the state it renders from.
+    dusk::audio::Shutdown();
+
     dusk::crash_reporting::shutdown();
     dusk::ShutdownFileLogging();
     fflush(stdout);

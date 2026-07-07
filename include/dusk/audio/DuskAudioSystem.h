@@ -1,5 +1,6 @@
 #pragma once
 
+#include <SDL3/SDL_audio.h>
 #include <cmath>
 #include <dolphin/types.h>
 
@@ -18,6 +19,12 @@ namespace dusk::audio {
      * Initialize the audio system and start playing audio.
      */
     void Initialize();
+
+    /**
+     * Stop the audio render thread and pause output.
+     * Safe to call even if Initialize() was never called.
+     */
+    void Shutdown();
 
     void SetEnableReverb(bool value);
 

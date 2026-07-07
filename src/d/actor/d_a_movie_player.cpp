@@ -32,6 +32,9 @@
 #include "dusk/gx_helper.h"
 #include "dusk/os.h"
 #include "dusk/layout.hpp"
+// >>> TEMP: THP movie-audio underrun instrumentation — remove after debugging >>>
+#include "tracy/Tracy.hpp"
+// <<< TEMP: THP movie-audio underrun instrumentation — remove after debugging <<<
 #if MOVIE_SUPPORT
 #include "turbojpeg.h"
 #endif
@@ -3494,6 +3497,13 @@ static u16 daMP_VolumeTable[] = {
 #pragma push
 #pragma optimization_level 3
 static void daMP_MixAudio(s16* destination, s16*, u32 sample) {
+// >>> TEMP: THP movie-audio underrun instrumentation — remove after debugging >>>
+#if TARGET_PC
+    // Shows this mix on the SDL audio thread's Tracy timeline so lock-waits on
+    // gAudioThreadMutex before/around it are visible.
+    ZoneScopedN("daMP_MixAudio");
+#endif
+// <<< TEMP: THP movie-audio underrun instrumentation — remove after debugging <<<
     if (daMP_ActivePlayer.open && daMP_ActivePlayer.internalState == 2 && daMP_ActivePlayer.audioExist) {
 		u32 sampleNum;
 		u32 requestSample;
@@ -3511,6 +3521,20 @@ static void daMP_MixAudio(s16* destination, s16*, u32 sample) {
 			do {
 				if (daMP_ActivePlayer.playAudioBuffer == (THPAudioBuffer*)NULL) {
 					if (!(daMP_ActivePlayer.playAudioBuffer = (THPAudioBuffer*)daMP_PopDecodedAudioBuffer(0))) {
+// >>> TEMP: THP movie-audio underrun instrumentation — remove after debugging >>>
+#if TARGET_PC
+						// Decoded-audio queue was empty when the mixer needed samples:
+						// this is the underrun that produces the crackle. Count it and drop
+						// a red marker on the Tracy timeline to correlate with lock-waits.
+						{
+							static u32 s_daMP_audioUnderrunCount = 0;
+							++s_daMP_audioUnderrunCount;
+							TracyPlot("THP audio underruns", (int64_t)s_daMP_audioUnderrunCount);
+							TracyMessageLC("THP movie audio underrun: decoded queue empty",
+								tracy::Color::Red);
+						}
+#endif
+// <<< TEMP: THP movie-audio underrun instrumentation — remove after debugging <<<
 						memset(dst, 0, requestSample * 4);
 						return;
 					}
