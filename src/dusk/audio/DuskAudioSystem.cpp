@@ -1,6 +1,7 @@
 #include "dusk/audio/DuskAudioSystem.h"
 
 #include <SDL3/SDL_init.h>
+#include <SDL3/SDL_mutex.h>
 #include <array>
 #include <cassert>
 #include <span>
@@ -15,6 +16,7 @@
 #include "DuskDsp.hpp"
 #include "JSystem/JAudio2/JASAudioThread.h"
 #include "JSystem/JAudio2/JASDriverIF.h"
+#include "dusk/logging.h"
 #include "tracy/Tracy.hpp"
 
 using namespace dusk::audio;
@@ -26,43 +28,58 @@ static SDL_AudioStream* PlaybackStream;
 
 /// Number of audio frames that should be queued in SDL3's buffer. The more frames queued, the less likely audio underruns will occur, but the more latency there will be between the game and the audio output.
 constexpr size_t TARGET_QUEUED_FRAMES = 2;
-constexpr size_t SAMPLE_SIZE = OutputSubframe::NUM_CHANNELS  * sizeof(f32);
-constexpr size_t BYTES_PER_SUBFRAME = DSP_SUBFRAME_SIZE * SAMPLE_SIZE;
-constexpr size_t TARGET_QUEUED_BYTES = TARGET_QUEUED_FRAMES * DSP_SUBFRAME_SIZE * SAMPLE_SIZE;
+
 /// Background thread that renders audio frames and outputs them to SDL3. This is used to avoid blocking the main thread when rendering audio, which can cause stuttering if the main thread is busy with other work.
 static std::thread AudioRenderThread;
 static std::atomic_bool AudioRenderThreadRunning = true;
-static auto AudioRenderThreadSemaphore = std::unique_ptr<SDL_Semaphore, decltype(&SDL_DestroySemaphore)>(SDL_CreateSemaphore(1), &SDL_DestroySemaphore);
+static SDL_Semaphore* AudioRenderThreadSemaphore = nullptr;
 
-/**
- * SDL audiostream callback to trigger rendering of new audio data.
- */
-static void SDLCALL GetNewAudio(
-    void*,
-    SDL_AudioStream*,
-    int needed,
-    int);
 
 /**
  * Render an entire new frame of audio and output it to SDL3.
  * Note: "audio frames" are unrelated to video frames.
- * @return Amount of audio samples rendered.
  */
-static size_t RenderNewAudioFrame();
+static void RenderNewAudioFrame();
 
 /**
  * Render an audio subframe and output it to SDL3.
  */
 static void RenderAudioSubframe();
 
+/**
+ * SDL audiostream worker thread for rendering new audio data.
+ */
 void RenderAudioWorker() {
+    // This code currently assumes that the value of sSubFrames will not change during the lifetime of the program. If that ever changes, this code will need to be updated to handle it.
     const auto target_subframes = JASDriver::sSubFrames * TARGET_QUEUED_FRAMES;
     const auto target_queued_bytes = target_subframes * DSP_SUBFRAME_SIZE * OutputSubframe::NUM_CHANNELS * sizeof(f32);
 
-    while (AudioRenderThreadRunning.load(std::memory_order_relaxed)) {
-        SDL_WaitSemaphoreTimeout(AudioRenderThreadSemaphore.get(), 1);
-        while(SDL_GetAudioStreamQueued(PlaybackStream) < target_queued_bytes) {
-            const size_t rendered_samples = RenderNewAudioFrame();
+    /// Gets the number of bytes currently queued in SDL3's audio buffer. Returns SIZE_MAX on error.
+    auto get_queued_bytes = [](size_t &failure_count) -> size_t {
+        auto queued_bytes = SDL_GetAudioStreamQueued(PlaybackStream);
+        if (queued_bytes < 0) {
+            failure_count += 1;
+            DuskLog.warn("SDL_GetAudioStreamQueued failed: {}", SDL_GetError());
+            return SIZE_MAX;
+        }
+        failure_count = 0;
+        return static_cast<size_t>(queued_bytes);
+    };
+
+    size_t failure_count = 0;
+    while (AudioRenderThreadRunning.load(std::memory_order_acquire)) {
+        SDL_WaitSemaphoreTimeout(AudioRenderThreadSemaphore, 1);
+        auto queued_bytes = get_queued_bytes(failure_count);
+        if (failure_count > 10) {
+            DuskLog.error("SDL_GetAudioStreamQueued failed too many times! Audio thread exiting...");
+            AudioRenderThreadRunning.store(false, std::memory_order_release);
+            break;
+        }
+
+        // We don't need an explicit check for SIZE_MAX here, since target_queued_bytes will never be greater than SIZE_MAX.
+        while(queued_bytes < target_queued_bytes) {
+            RenderNewAudioFrame();
+            queued_bytes = get_queued_bytes(failure_count);
         }
     }
 }
@@ -76,10 +93,12 @@ static void InitSDL3Output() {
         SampleRate,
     };
 
+    AudioRenderThreadSemaphore = SDL_CreateSemaphore(1);
+
     PlaybackStream = SDL_OpenAudioDeviceStream(
         SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
         &spec,
-        [](void*, SDL_AudioStream*, int, int) { SDL_SignalSemaphore(AudioRenderThreadSemaphore.get()); },
+        [](void*, SDL_AudioStream*, int, int) { SDL_SignalSemaphore(AudioRenderThreadSemaphore); },
         nullptr);
 }
 
@@ -117,25 +136,7 @@ void dusk::audio::SetEnableReverb(const bool value) {
     EnableReverb = value;
 }
 
-#ifdef TRACY_ENABLE
-static auto FrameName = "GetNewAudio";
-#endif
-
-void SDLCALL GetNewAudio(
-    void*,
-    SDL_AudioStream*,
-    int needed,
-    int) {
-    FrameMarkStart(FrameName);
-    while (needed > 0) {
-        const size_t rendered_samples = RenderNewAudioFrame();
-        const size_t rendered_bytes = rendered_samples * SAMPLE_SIZE;
-        needed -= rendered_samples;
-    }
-    FrameMarkEnd(FrameName);
-}
-
-size_t RenderNewAudioFrame() {
+void RenderNewAudioFrame() {
     ZoneScoped;
     JASCriticalSection section;
     const u32 countSubframes = JASDriver::getSubFrames();
@@ -148,7 +149,7 @@ size_t RenderNewAudioFrame() {
         JASAudioThread::snIntCount -= 1;
     }
 
-    return static_cast<u16>(countSubframes) * DSP_SUBFRAME_SIZE;
+    // return static_cast<u16>(countSubframes) * DSP_SUBFRAME_SIZE;
 }
 
 static void InterleaveOutputData(const OutputSubframe& data, std::span<f32> target) {
@@ -197,9 +198,17 @@ f32 dusk::audio::VolumeFromU16(u16 value) {
 }
 
 void dusk::audio::Shutdown() {
-    AudioRenderThreadRunning.store(false, std::memory_order_relaxed);
+    AudioRenderThreadRunning.store(false, std::memory_order_release);
+    SDL_SignalSemaphore(AudioRenderThreadSemaphore);
+    SDL_PauseAudioStreamDevice(PlaybackStream);
+
     if (AudioRenderThread.joinable()) {
         AudioRenderThread.join();
     }
+    
     SDL_DestroyAudioStream(PlaybackStream);
+    PlaybackStream = nullptr;
+
+    SDL_DestroySemaphore(AudioRenderThreadSemaphore);
+    AudioRenderThreadSemaphore = nullptr;
 }
