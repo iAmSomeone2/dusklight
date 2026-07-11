@@ -123,7 +123,7 @@ const int audioHeapSize = 0x14D800;
 
 #if TARGET_PC
 bool dusk::IsRunning = true;
-bool dusk::IsShuttingDown = false;
+std::atomic_bool dusk::IsShuttingDown = false;
 bool dusk::IsGameLaunched = false;
 bool dusk::RestartRequested = false;
 uint8_t dusk::SaveRequested = 0;

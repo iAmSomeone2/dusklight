@@ -12,6 +12,7 @@
 #include <memory>
 #include <dusk/logging.h>
 #include <dusk/main.h>
+#include <dusk/OSSideTable.hpp>
 
 #include "tracy/Tracy.hpp"
 
@@ -41,7 +42,6 @@ static LARGE_INTEGER PerfFrequency;
 static bool PerfInitialized = false;
 #endif
 
-
 // ==========================================================================
 // General OS
 // ==========================================================================
@@ -65,35 +65,17 @@ struct PCMessageQueueData {
     std::condition_variable cvReceive;  // Notified when a message arrives
 };
 
-// Lazy-initialized to avoid DLL static init crashes
-static std::mutex& GetMsgQueueMapMutex() {
-    static std::mutex mtx;
-    return mtx;
-}
-static std::unordered_map<OSMessageQueue*, std::unique_ptr<PCMessageQueueData>>& GetMsgQueueMap() {
-    static std::unordered_map<OSMessageQueue*, std::unique_ptr<PCMessageQueueData>> map;
-    return map;
-}
+using MQSideTable = OSSideTable<OSMessageQueue, PCMessageQueueData>;
 
-static PCMessageQueueData& GetMsgQueueData(OSMessageQueue* mq) {
-    std::lock_guard<std::mutex> lock(GetMsgQueueMapMutex());
-    auto& map = GetMsgQueueMap();
-    auto it = map.find(mq);
-    if (it == map.end()) {
-        auto result = map.emplace(mq, std::make_unique<PCMessageQueueData>());
-        return *result.first->second;
-    }
-    return *it->second;
-}
-
-static void ClearMsgQueueMap() {
-    std::lock_guard<std::mutex> lock(GetMsgQueueMapMutex());
-    auto& map = GetMsgQueueMap();
-    for (auto & [_, value] : map) {
-        value->cvReceive.notify_all();
-        value->cvSend.notify_all();
-    }
-    map.clear();
+static void WakeAllMsgQueueWaiters() {
+    MQSideTable::forEach([](PCMessageQueueData& data) {
+       data.cvSend.notify_all();
+        data.cvReceive.notify_all();
+    });
+    /*
+     * The map is intentionally leaked so that data isn't dropped before all threads have shutdown.
+     * Since this fn should only be called on shutdown, this should be fine.
+     */
 }
 
 void OSInitMessageQueue(OSMessageQueue* mq, OSMessage* msgArray, s32 msgCount) {
@@ -104,78 +86,78 @@ void OSInitMessageQueue(OSMessageQueue* mq, OSMessage* msgArray, s32 msgCount) {
     mq->msgCount   = msgCount;
     mq->firstIndex = 0;
     mq->usedCount  = 0;
-    GetMsgQueueData(mq);  // Ensure side-table entry exists
+    MQSideTable::get(mq);
 }
 
 int OSSendMessage(OSMessageQueue* mq, void* msg, s32 flags) {
     if (!mq) return 0;
 
-    PCMessageQueueData& data = GetMsgQueueData(mq);
-    std::unique_lock<std::mutex> lock(data.mtx);
+    const auto data = MQSideTable::get(mq);
+    std::unique_lock lock(data->mtx);
 
     if (mq->usedCount >= mq->msgCount) {
         if (flags == OS_MESSAGE_NOBLOCK) return 0;
         // BLOCK: wait until space is available
-        data.cvSend.wait(lock, [mq] { return mq->usedCount < mq->msgCount || dusk::IsShuttingDown; });
+        data->cvSend.wait(lock, [mq] { return mq->usedCount < mq->msgCount || dusk::IsShuttingDown.load(std::memory_order_acquire); });
     }
-    if (dusk::IsShuttingDown) {
+    if (dusk::IsShuttingDown.load(std::memory_order_acquire)) {
         return 0;
     }
 
-    s32 idx = (mq->firstIndex + mq->usedCount) % mq->msgCount;
-    ((OSMessage*)mq->msgArray)[idx] = msg;
+    const s32 idx = (mq->firstIndex + mq->usedCount) % mq->msgCount;
+    mq->msgArray[idx] = msg;
     mq->usedCount++;
 
-    data.cvReceive.notify_one();
+    data->cvReceive.notify_one();
     return 1;
 }
 
 BOOL OSReceiveMessage(OSMessageQueue* mq, OSMessage* msg, s32 flags) {
     if (!mq) return 0;
 
-    PCMessageQueueData& data = GetMsgQueueData(mq);
-    std::unique_lock<std::mutex> lock(data.mtx);
+    const auto data = MQSideTable::get(mq);
+    std::unique_lock lock(data->mtx);
 
     if (mq->usedCount == 0) {
         if (flags == OS_MESSAGE_NOBLOCK) return 0;
         // BLOCK: wait until a message arrives
-        data.cvReceive.wait(lock, [mq] { return mq->usedCount > 0 || dusk::IsShuttingDown; });
+        data->cvReceive.wait(lock, [mq] { return mq->usedCount > 0 || dusk::IsShuttingDown.load(std::memory_order_acquire); });
     }
-    if (dusk::IsShuttingDown) {
+    if (dusk::IsShuttingDown.load(std::memory_order_acquire)) {
         return 0;
     }
 
     if (msg) {
-        *(OSMessage*)msg = ((OSMessage*)mq->msgArray)[mq->firstIndex];
+        *msg = mq->msgArray[mq->firstIndex];
     }
     mq->firstIndex = (mq->firstIndex + 1) % mq->msgCount;
     mq->usedCount--;
 
-    data.cvSend.notify_one();
+    data->cvSend.notify_one();
     return 1;
 }
 
 int OSJamMessage(OSMessageQueue* mq, void* msg, s32 flags) {
     if (!mq) return 0;
 
-    PCMessageQueueData& data = GetMsgQueueData(mq);
-    std::unique_lock<std::mutex> lock(data.mtx);
+    const auto data = MQSideTable::get(mq);
+    std::unique_lock lock(data->mtx);
 
     if (mq->usedCount >= mq->msgCount) {
         if (flags == OS_MESSAGE_NOBLOCK) return 0;
         // BLOCK: wait until space is available
-        data.cvSend.wait(lock, [mq] { return mq->usedCount < mq->msgCount || dusk::IsShuttingDown; });
+        data->cvSend.wait(lock, [mq] { return mq->usedCount < mq->msgCount || dusk::IsShuttingDown.load(std::memory_order_acquire); });
     }
-    if (dusk::IsShuttingDown) {
+    if (dusk::IsShuttingDown.load(std::memory_order_acquire)) {
         return 0;
     }
 
     // Jam inserts at the front of the queue
     mq->firstIndex = (mq->firstIndex - 1 + mq->msgCount) % mq->msgCount;
-    ((OSMessage*)mq->msgArray)[mq->firstIndex] = msg;
+    mq->msgArray[mq->firstIndex] = msg;
     mq->usedCount++;
 
-    data.cvReceive.notify_one();
+    data->cvReceive.notify_one();
     return 1;
 }
 
@@ -201,8 +183,8 @@ BOOL OSLink(OSModuleInfo* newModule, void* bss) { return TRUE; }
 void ClearCondMap();
 void OSResetSystem(int reset, u32 resetCode, BOOL forceMenu) {
     OSReport("[PC] OSResetSystem called (reset=%d, code=%u)\n", reset, resetCode);
-    dusk::IsShuttingDown = true;
-    ClearMsgQueueMap();
+    dusk::IsShuttingDown.store(true, std::memory_order_release);
+    WakeAllMsgQueueWaiters();
     ClearCondMap();
 }
 

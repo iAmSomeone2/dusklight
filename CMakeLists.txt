@@ -436,7 +436,9 @@ if (CMAKE_CXX_LINK_GROUP_USING_RESCAN_SUPPORTED OR CMAKE_LINK_GROUP_USING_RESCAN
     set(JSYSTEM_LINK_LIBRARIES "$<LINK_GROUP:RESCAN,${JSYSTEM_LIBRARIES}>")
 endif ()
 
-set(DUSK_FILES src/dusk/main.cpp ${GAME_BASE_FILES} ${GAME_DEBUG_FILES} ${miniz_SOURCE_DIR}/miniz.c)
+set(DUSK_FILES src/dusk/main.cpp ${GAME_BASE_FILES} ${GAME_DEBUG_FILES} ${miniz_SOURCE_DIR}/miniz.c
+        src/dusk/OSSideTable.hpp
+)
 if(ANDROID)
     add_library(dusklight SHARED ${DUSK_FILES})
     set_target_properties(dusklight PROPERTIES OUTPUT_NAME main)
