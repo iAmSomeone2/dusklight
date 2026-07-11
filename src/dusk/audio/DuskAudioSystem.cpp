@@ -56,7 +56,7 @@ void RenderAudioWorker() {
 
     /// Gets the number of bytes currently queued in SDL3's audio buffer. Returns SIZE_MAX on error.
     auto get_queued_bytes = [](size_t &failure_count) -> size_t {
-        auto queued_bytes = SDL_GetAudioStreamQueued(PlaybackStream);
+        const auto queued_bytes = SDL_GetAudioStreamQueued(PlaybackStream);
         if (queued_bytes < 0) {
             failure_count += 1;
             DuskLog.warn("SDL_GetAudioStreamQueued failed: {}", SDL_GetError());
@@ -148,8 +148,6 @@ void RenderNewAudioFrame() {
 
         JASAudioThread::snIntCount -= 1;
     }
-
-    // return static_cast<u16>(countSubframes) * DSP_SUBFRAME_SIZE;
 }
 
 static void InterleaveOutputData(const OutputSubframe& data, std::span<f32> target) {
