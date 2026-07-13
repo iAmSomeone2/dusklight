@@ -266,6 +266,8 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
         "BUILD_SHARED_LIBS": {
           "type": "BOOL",
           "value": false

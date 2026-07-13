@@ -207,12 +207,12 @@ BOOL OSLink(OSModuleInfo* newModule, void* bss) {
     return TRUE;
 }
 
-void ClearCondMap();
+void WakeAllCondWaiters();
 void OSResetSystem(int reset, u32 resetCode, BOOL forceMenu) {
     OSReport("[PC] OSResetSystem called (reset=%d, code=%u)\n", reset, resetCode);
     dusk::IsShuttingDown.store(true, std::memory_order_release);
     WakeAllMsgQueueWaiters();
-    ClearCondMap();
+    WakeAllCondWaiters();
 }
 
 void OSSetStringTable(void* stringTable) {}

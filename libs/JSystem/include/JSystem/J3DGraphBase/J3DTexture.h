@@ -7,13 +7,22 @@
 #include "global.h"
 #include <stdint.h>
 
+#if TARGET_PC
+#include "JSystem/JKernel/JKRDisposer.h"
+#endif
+
 #include "dusk/gx_helper.h"
 
 /**
  * @ingroup jsystem-j3d
  *
  */
-class J3DTexture {
+class J3DTexture
+#if TARGET_PC
+// Ensures that the allocated memory is properly disposed of on ported systems
+    : public JKRDisposer
+#endif
+{
 private:
     /* 0x0 */ u16 mNum;
     /* 0x2 */ u16 unk_0x2;
