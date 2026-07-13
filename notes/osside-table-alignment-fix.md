@@ -34,9 +34,33 @@ The failing address is the object's address (the slot field is at offset 0), so:
 
 ## The fix: store a 4-byte handle, not an 8-byte pointer
 
-`alignof(uint32_t) == 4`, satisfied by a `4-mod-8` address. Both desktop (x86-64)
-and the Vita target are little-endian, so the low 4 bytes of the 8-byte dead field
-are the first 4 bytes at offset 0 — no endianness trap.
+`alignof(uint32_t) == 4`, satisfied by a `4-mod-8` address.
+
+**Endianness is a non-issue — and *not* for the reason a byte-layout argument would
+suggest.** Endianness only corrupts a value when it is written at one width and read
+back at another (or when a sub-field is read at an assumed byte offset). This scheme
+never does that. Correctness rests on two facts:
+
+1. **The dead field is only ever touched as one identical 4-byte view.** Both the
+   store and the load go through the same `slot()` — `reinterpret_cast<uint32_t&>` of
+   the field, the same 4 bytes at offset 0. Write handle `5` into that window, read
+   the same window back, get `5`. That round-trip is byte-order-agnostic: same four
+   bytes in, same four bytes out, never "reassemble a wider integer from bytes." On a
+   64-bit big-endian target the handle simply lands in the *high* word of the 8-byte
+   field instead of the low word — invisible, because nothing reads those bytes as a
+   wider quantity.
+2. **The field is genuinely dead** apart from that view. The only other access is
+   `OSInit*` zeroing the *whole* 8-byte field (`head = nullptr`), which is all-zero
+   bytes on either endian — so the offset-0 `uint32` reads back `0`, the sentinel.
+
+> Do **not** "relocate the handle to the low word" on big-endian. That would be the
+> one change that *introduces* a width-mismatch bug. The offset-0 view is correct on
+> every endianness precisely because read and write share it.
+>
+> Corollaries: even a hypothetical full-pointer `!= NULL` check survives BE (the
+> handle sits in the high word, so the 8-byte value is still non-zero when assigned);
+> and a 32-bit BE target is trivially fine (`void*` is 4 bytes, so the `uint32_t` view
+> *is* the whole field).
 
 - **Slot** becomes `uint32_t&` (reinterpret the dead field). `0` stays the
   "unassigned" sentinel that matches the field `OSInit*` nulls, so handles are

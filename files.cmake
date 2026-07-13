@@ -1545,10 +1545,10 @@ set(DUSK_FILES
         src/dusk/iso_validate.cpp
         src/dusk/livesplit.cpp
         src/dusk/offset_ptr.cpp
-        src/dusk/OSContext.cpp
-        src/dusk/OSReport.cpp
-        src/dusk/OSThread.cpp
-        src/dusk/OSMutex.cpp
+        src/dusk/os/OSContext.cpp
+        src/dusk/os/OSReport.cpp
+        src/dusk/os/OSThread.cpp
+        src/dusk/os/OSMutex.cpp
         src/dusk/mods/log_buffer.cpp
         src/dusk/mods/log_buffer.hpp
         src/dusk/mods/manifest.cpp
