@@ -1,17 +1,10 @@
 #include <condition_variable>
-#include <cstdint>
-#include <cstdlib>
 #include <dolphin/dolphin.h>
 #include <dolphin/gx.h>
 #include <dusk/logging.h>
 #include <dusk/main.h>
 #include <dusk/os/OSSideTable.hpp>
-#include <memory>
 #include <mutex>
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
-#include <unordered_map>
 
 #include "tracy/Tracy.hpp"
 

@@ -1,4 +1,5 @@
-/** Contention-free re-implementation of the message queue side-table system used in
+/**
+ * Contention-free re-implementation of the message queue side-table system used in
  * 'stubs.cpp'
  */
 
@@ -9,7 +10,7 @@
 #include <mutex>
 
 #include <dolphin/os/OSMutex.h>
-#include "PCDataRegistry.h"
+#include "PCDataRegistry.hpp"
 
 /**
  * @brief Contention-free re-implementation of the message queue side-table system used in
@@ -19,8 +20,8 @@
  * This implementation of the side-table idea is designed to provide a contention-free mechanism
  * for managing additional porting-related data associated with objects in the GameCube engine code.
  * For this to work, the GCType's first field must be unused in porting code and be at least 4-bytes
- * wide. This value will be used as a handle for each PCData entry, allowing access to the associated
- * porting-related data.
+ * wide. This value will be used as a handle for each PCData entry, allowing access to the
+ * associated porting-related data.
  *
  * @details
  * On the backend, 'PCDataRegistry' is used to manage the pointers to the PCData objects and to
@@ -39,7 +40,7 @@
 template <typename GCType, typename PCData>
 class OSSideTable {
 public:
-    /** Get a reference to the lower 4-bytes of the dead pointer field (4-bytes aligned) to use as
+    /** Get a reference to the lower 4-bytes of the dead field (4-bytes aligned) to use as
      * a handle for each live entry.
      *
      * @note This function must be specialized for each GCType.
@@ -122,7 +123,8 @@ private:
     /**
      * Map of GCType pointers to PCData handles.
      *
-     * @note This is intentionally leaked so that data isn't dropped before all threads have shutdown.
+     * @note This is intentionally leaked at shutdown so that data isn't dropped before all threads
+     * have exited.
      */
     static std::unordered_map<GCType*, uint32_t>& map() {
         static std::unordered_map<GCType*, uint32_t> instance;

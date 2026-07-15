@@ -438,7 +438,9 @@ endif ()
 
 set(DUSK_FILES src/dusk/main.cpp ${GAME_BASE_FILES} ${GAME_DEBUG_FILES} ${miniz_SOURCE_DIR}/miniz.c
         src/dusk/os/OSSideTable.hpp
-        src/dusk/os/PCDataRegistry.h
+        src/dusk/os/PCDataRegistry.hpp
+        src/dusk/os/PCMessageQueue.hpp
+        src/dusk/os/PCMessageQueue.cpp
 )
 if(ANDROID)
     add_library(dusklight SHARED ${DUSK_FILES})
