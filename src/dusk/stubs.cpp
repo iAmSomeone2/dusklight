@@ -6,6 +6,8 @@
 #include <dusk/os/OSSideTable.hpp>
 #include <mutex>
 
+#include "os/reflection.h"
+#include "pc/PCMessageQueue.hpp"
 #include "tracy/Tracy.hpp"
 
 #ifndef _WIN32
@@ -57,7 +59,7 @@ struct PCMessageQueueData {
     std::condition_variable cvReceive;  // Notified when a message arrives
 };
 
-using MQSideTable = OSSideTable<OSMessageQueue, PCMessageQueueData>;
+using MQSideTable = OSSideTable<OSMessageQueue, PCMessageQueue, size_t>;
 
 template <>
 uint32_t& MQSideTable::slot(OSMessageQueue* obj) {
@@ -65,108 +67,52 @@ uint32_t& MQSideTable::slot(OSMessageQueue* obj) {
 }
 
 static void WakeAllMsgQueueWaiters() {
-    MQSideTable::forEach([](PCMessageQueueData& data) {
-        data.cvSend.notify_all();
-        data.cvReceive.notify_all();
+    MQSideTable::forEach([](PCMessageQueue& mq) {
+        mq.wakeAllWaiters();
     });
 }
 
-void OSInitMessageQueue(OSMessageQueue* mq, OSMessage* msgArray, s32 msgCount) {
+void OSInitMessageQueue(OSMessageQueue* mq, OSMessage*, const s32 msgCount) {
     if (!mq)
         return;
     mq->queueSend.head = mq->queueSend.tail = nullptr;
     mq->queueReceive.head = mq->queueReceive.tail = nullptr;
-    mq->msgArray = msgArray;
+    mq->msgArray = nullptr;
     mq->msgCount = msgCount;
     mq->firstIndex = 0;
     mq->usedCount = 0;
-    MQSideTable::get(mq);
+    const auto capacity = static_cast<size_t>(msgCount);
+    MQSideTable::initPCData(mq, capacity);
 }
 
-int OSSendMessage(OSMessageQueue* mq, void* msg, s32 flags) {
-    if (!mq)
+int OSSendMessage(OSMessageQueue* mq, void* msg, const s32 flags) {
+    const auto shouldBlock = flags != OS_MESSAGE_NOBLOCK;
+
+    const auto pcMq = MQSideTable::get(mq);
+    if (!pcMq)
         return 0;
 
-    const auto data = MQSideTable::get(mq);
-    std::unique_lock lock(data->mtx);
-
-    if (mq->usedCount >= mq->msgCount) {
-        if (flags == OS_MESSAGE_NOBLOCK)
-            return 0;
-        // BLOCK: wait until space is available
-        data->cvSend.wait(lock, [mq] {
-            return mq->usedCount < mq->msgCount ||
-                   dusk::IsShuttingDown.load(std::memory_order_acquire);
-        });
-    }
-    if (dusk::IsShuttingDown.load(std::memory_order_acquire)) {
-        return 0;
-    }
-
-    const s32 idx = (mq->firstIndex + mq->usedCount) % mq->msgCount;
-    mq->msgArray[idx] = msg;
-    mq->usedCount++;
-
-    data->cvReceive.notify_one();
-    return 1;
+    return pcMq->push(msg, shouldBlock);
 }
 
-BOOL OSReceiveMessage(OSMessageQueue* mq, OSMessage* msg, s32 flags) {
-    if (!mq)
+int OSReceiveMessage(OSMessageQueue* mq, OSMessage* msg, const s32 flags) {
+    const auto shouldBlock = flags != OS_MESSAGE_NOBLOCK;
+
+    const auto pcMq = MQSideTable::get(mq);
+    if (!pcMq)
         return 0;
 
-    const auto data = MQSideTable::get(mq);
-    std::unique_lock lock(data->mtx);
-
-    if (mq->usedCount == 0) {
-        if (flags == OS_MESSAGE_NOBLOCK)
-            return 0;
-        // BLOCK: wait until a message arrives
-        data->cvReceive.wait(lock, [mq] {
-            return mq->usedCount > 0 || dusk::IsShuttingDown.load(std::memory_order_acquire);
-        });
-    }
-    if (dusk::IsShuttingDown.load(std::memory_order_acquire)) {
-        return 0;
-    }
-
-    if (msg) {
-        *msg = mq->msgArray[mq->firstIndex];
-    }
-    mq->firstIndex = (mq->firstIndex + 1) % mq->msgCount;
-    mq->usedCount--;
-
-    data->cvSend.notify_one();
-    return 1;
+    return pcMq->pop(msg, shouldBlock);
 }
 
-int OSJamMessage(OSMessageQueue* mq, void* msg, s32 flags) {
-    if (!mq)
+int OSJamMessage(OSMessageQueue* mq, void* msg, const s32 flags) {
+    const auto shouldBlock = flags != OS_MESSAGE_NOBLOCK;
+
+    const auto pcMq = MQSideTable::get(mq);
+    if (!pcMq)
         return 0;
 
-    const auto data = MQSideTable::get(mq);
-    std::unique_lock lock(data->mtx);
-
-    if (mq->usedCount >= mq->msgCount) {
-        if (flags == OS_MESSAGE_NOBLOCK)
-            return 0;
-        // BLOCK: wait until space is available
-        data->cvSend.wait(lock, [mq] {
-            return mq->usedCount < mq->msgCount ||
-                   dusk::IsShuttingDown.load(std::memory_order_acquire);
-        });
-    }
-    if (dusk::IsShuttingDown.load(std::memory_order_acquire)) {
-        return 0;
-    }
-
-    // Jam inserts at the front of the queue
-    mq->firstIndex = (mq->firstIndex - 1 + mq->msgCount) % mq->msgCount;
-    mq->msgArray[mq->firstIndex] = msg;
-    mq->usedCount++;
-
-    data->cvReceive.notify_one();
-    return 1;
+    return pcMq->jam(msg, shouldBlock);
 }
 
 // ==========================================================================

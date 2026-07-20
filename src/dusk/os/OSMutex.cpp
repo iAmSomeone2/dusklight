@@ -54,13 +54,13 @@ void OSInitMutex(OSMutex* mutex) {
     mutex->count  = 0;
 
     // Create/reset side-table entry
-    MutexSideTable::get(mutex);
+    MutexSideTable::getOrInit(mutex);
 }
 
 void OSLockMutex(OSMutex* mutex) {
     if (!mutex) return;
 
-    PCMutexData* data = MutexSideTable::get(mutex);
+    PCMutexData* data = MutexSideTable::getOrInit(mutex);
     data->nativeMutex.lock();
 
     // Update GC-visible fields
@@ -80,14 +80,14 @@ void OSUnlockMutex(OSMutex* mutex) {
         mutex->thread = nullptr;
     }
 
-    PCMutexData* data = MutexSideTable::get(mutex);
+    PCMutexData* data = MutexSideTable::getOrInit(mutex);
     data->nativeMutex.unlock();
 }
 
 BOOL OSTryLockMutex(OSMutex* mutex) {
     if (!mutex) return FALSE;
 
-    PCMutexData* data = MutexSideTable::get(mutex);
+    PCMutexData* data = MutexSideTable::getOrInit(mutex);
     if (data->nativeMutex.try_lock()) {
         OSThread* currentThread = OSGetCurrentThread();
         mutex->thread = currentThread;
@@ -126,14 +126,14 @@ int __OSCheckMutexes(OSThread* thread) {
 void OSInitCond(OSCond* cond) {
     if (!cond) return;
     OSInitThreadQueue(&cond->queue);
-    CondSideTable::get(cond);
+    CondSideTable::getOrInit(cond);
 }
 
 void OSWaitCond(OSCond* cond, OSMutex* mutex) {
     if (!cond || !mutex) return;
 
-    PCCondData* condData = CondSideTable::get(cond);
-    PCMutexData* mutexData = MutexSideTable::get(mutex);
+    PCCondData* condData = CondSideTable::getOrInit(cond);
+    PCMutexData* mutexData = MutexSideTable::getOrInit(mutex);
 
     // Save and clear the GC mutex state
     OSThread* currentThread = OSGetCurrentThread();
@@ -166,7 +166,7 @@ void OSWaitCond(OSCond* cond, OSMutex* mutex) {
 
 void OSSignalCond(OSCond* cond) {
     if (!cond) return;
-    PCCondData* condData = CondSideTable::get(cond);
+    PCCondData* condData = CondSideTable::getOrInit(cond);
     condData->cv.notify_all();
 }
 

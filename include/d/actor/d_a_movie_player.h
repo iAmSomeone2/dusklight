@@ -90,9 +90,9 @@ static u32 THPAudioDecode(s16* audioBuffer, u8* audioFrame, s32 flag);
 static s32 __THPAudioGetNewSample(THPAudioDecodeInfo* info);
 static void __THPAudioInitialize(THPAudioDecodeInfo* info, u8* ptr);
 
-#define THP_AUDIO_BUFFER_COUNT 3
+#define THP_AUDIO_BUFFER_COUNT 6
 #define THP_READ_BUFFER_COUNT  10
-#define THP_TEXTURE_SET_COUNT  3
+#define THP_TEXTURE_SET_COUNT  6
 #endif
 
 #if TARGET_PC

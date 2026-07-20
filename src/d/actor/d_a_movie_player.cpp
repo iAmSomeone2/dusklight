@@ -24,14 +24,27 @@
 
 #include <cassert>
 
+#include "../../dusk/pc/PCMessageQueue.hpp"
+#include "dusk/os/OSSideTable.hpp"
+// TEMP DIAGNOSTIC (Tracy) — remove before commit
+#include "tracy/Tracy.hpp"
 #include "f_op/f_op_overlap_mng.h"
 
 #include "JSystem/JAudio2/JASCriticalSection.h"
 
 #if TARGET_PC
+#include <memory>
 #include "dusk/gx_helper.h"
 #include "dusk/os.h"
 #include "dusk/layout.hpp"
+#include "dusk/pc/PCHeap.hpp"
+
+using MQSideTable = OSSideTable<OSMessageQueue, PCMessageQueue, size_t>;
+using dusk::pc::PCHeap;
+
+// Port-only heap with a static 5MiB allocation
+#define HEAP_CAPACITY 1024 * 1024 * 5
+static std::unique_ptr<PCHeap<HEAP_CAPACITY>> gTHPHeap = nullptr;
 #if MOVIE_SUPPORT
 #include "turbojpeg.h"
 #endif
@@ -2910,9 +2923,9 @@ void daMP_PushDecodedTextureSet(void* tex) {
     OSSendMessage(&daMP_DecodedTextureSetQueue, tex, 1);
 }
 
-static OSMessage daMP_FreeTextureSetMessage[3];
+static OSMessage daMP_FreeTextureSetMessage[THP_TEXTURE_SET_COUNT];
 
-static OSMessage daMP_DecodedTextureSetMessage[3];
+static OSMessage daMP_DecodedTextureSetMessage[THP_TEXTURE_SET_COUNT];
 
 static BOOL daMP_First;
 
@@ -3097,8 +3110,8 @@ static BOOL daMP_CreateVideoDecodeThread(OSPriority prio, u8* param_1) {
         }
     }
 
-    OSInitMessageQueue(&daMP_FreeTextureSetQueue, daMP_FreeTextureSetMessage, 3);
-    OSInitMessageQueue(&daMP_DecodedTextureSetQueue, daMP_DecodedTextureSetMessage, 3);
+    OSInitMessageQueue(&daMP_FreeTextureSetQueue, daMP_FreeTextureSetMessage, THP_TEXTURE_SET_COUNT);
+    OSInitMessageQueue(&daMP_DecodedTextureSetQueue, daMP_DecodedTextureSetMessage, THP_TEXTURE_SET_COUNT);
 
     daMP_First = daMP_VideoDecodeThreadCreated = TRUE;
     return TRUE;
@@ -3263,9 +3276,9 @@ static void* daMP_AudioDecoderForOnMemory(void* param_0) {
     return nullptr;
 }
 
-static OSMessage daMP_FreeAudioBufferMessage[3];
+static OSMessage daMP_FreeAudioBufferMessage[THP_AUDIO_BUFFER_COUNT];
 
-static OSMessage daMP_DecodedAudioBufferMessage[3];
+static OSMessage daMP_DecodedAudioBufferMessage[THP_AUDIO_BUFFER_COUNT];
 
 static BOOL daMP_CreateAudioDecodeThread(OSPriority prio, u8* param_1) {
 #if TARGET_PC
@@ -3283,8 +3296,8 @@ static BOOL daMP_CreateAudioDecodeThread(OSPriority prio, u8* param_1) {
         }
     }
 
-    OSInitMessageQueue(&daMP_FreeAudioBufferQueue, daMP_FreeAudioBufferMessage, 3);
-    OSInitMessageQueue(&daMP_DecodedAudioBufferQueue, daMP_DecodedAudioBufferMessage, 3);
+    OSInitMessageQueue(&daMP_FreeAudioBufferQueue, daMP_FreeAudioBufferMessage, THP_AUDIO_BUFFER_COUNT);
+    OSInitMessageQueue(&daMP_DecodedAudioBufferQueue, daMP_DecodedAudioBufferMessage, THP_AUDIO_BUFFER_COUNT);
 
     daMP_AudioDecodeThreadCreated = TRUE;
     return TRUE;
@@ -3506,11 +3519,26 @@ static void daMP_MixAudio(s16* destination, s16*, u32 sample) {
 		requestSample = sample;
 		dst = destination;
 
+#if TARGET_PC
+		// TEMP DIAGNOSTIC (Tracy) — remove before commit
+		if (const auto q = OSSideTable<OSMessageQueue, PCMessageQueue, size_t>::get(&daMP_DecodedAudioBufferQueue)) {
+			TracyPlot("DecodedAudioQueueDepth", static_cast<int64_t>(q->msgCount()));
+		}
+#endif
+
         BOOL loop = TRUE;
 		do {
 			do {
 				if (daMP_ActivePlayer.playAudioBuffer == (THPAudioBuffer*)NULL) {
 					if (!(daMP_ActivePlayer.playAudioBuffer = (THPAudioBuffer*)daMP_PopDecodedAudioBuffer(0))) {
+#if TARGET_PC
+						// TEMP DIAGNOSTIC (Tracy) — remove before commit
+						{
+							static int64_t sUnderruns = 0;
+							TracyMessageL("daMP_MixAudio underrun: silence fill");
+							TracyPlot("MovieAudioUnderruns", ++sUnderruns);
+						}
+#endif
 						memset(dst, 0, requestSample * 4);
 						return;
 					}
@@ -4312,12 +4340,14 @@ static BOOL daMP_ActivePlayer_Init(char const* moviePath) {
 
     daMP_DrawPosX = (width - daMP_videoInfo.xSize) >> 1;
     daMP_DrawPosY = (height - daMP_videoInfo.ySize) >> 1;
-#endif
 
     // "The memory needed for this THP movie is %d bytes\n"
     OS_REPORT("このＴＨＰムービーが必要なメモリは%dバイトです\n", daMP_THPPlayerCalcNeedMemory());
 
     daMP_buffer = mDoExt_getArchiveHeap()->alloc(daMP_THPPlayerCalcNeedMemory(), 0x20);
+#else
+    daMP_buffer = gTHPHeap->allocate(daMP_THPPlayerCalcNeedMemory(), 0x20);
+#endif
     if (daMP_buffer == NULL) {
         OSReport("Can't allocate the memory");
         #if DEBUG
@@ -4356,7 +4386,12 @@ static void daMP_ActivePlayer_Finish() {
     daMP_THPPlayerQuit();
 
     if (daMP_buffer != NULL) {
+#if !TARGET_PC
         JKRFree(daMP_buffer);
+#else
+        gTHPHeap->reset();
+        daMP_buffer = nullptr;
+#endif
     }
 }
 
@@ -4366,7 +4401,12 @@ static void daMP_ActivePlayer_Main() {
         daMP_THPPlayerClose();
 
         if (daMP_buffer != NULL) {
+#if !TARGET_PC
             JKRFree(daMP_buffer);
+#else
+            gTHPHeap->reset();
+            daMP_buffer = nullptr;
+#endif
         }
 
         OSReport("Error happen");
@@ -4413,13 +4453,22 @@ static void daMP_ActivePlayer_Draw() {
 
 #if TARGET_PC && 0
     if (ImGui::Begin("Movie player")) {
-        ImGui::Text("daMP_ReadedBufferQueue: %d", daMP_ReadedBufferQueue.usedCount);
-        ImGui::Text("daMP_ReadedBufferQueue2: %d", daMP_ReadedBufferQueue2.usedCount);
-        ImGui::Text("daMP_FreeReadBufferQueue: %d", daMP_FreeReadBufferQueue.usedCount);
-        ImGui::Text("daMP_DecodedTextureSetQueue: %d", daMP_DecodedTextureSetQueue.usedCount);
-        ImGui::Text("daMP_FreeTextureSetQueue: %d", daMP_FreeTextureSetQueue.usedCount);
-        ImGui::Text("daMP_DecodedAudioBufferQueue: %d", daMP_DecodedAudioBufferQueue.usedCount);
-        ImGui::Text("daMP_FreeAudioBufferQueue: %d", daMP_FreeAudioBufferQueue.usedCount);
+        // The new queue system renders fields in 'OSMessageQueues' into dead code, so the actual "PCMessageQueues" must be read from instead
+        const auto readBufQueue = MQSideTable::get(&daMP_ReadedBufferQueue);
+        const auto readBufQueue2 = MQSideTable::get(&daMP_ReadedBufferQueue2);
+        const auto freeReadBufQueue = MQSideTable::get(&daMP_FreeReadBufferQueue);
+        const auto decodedTextureSetQueue = MQSideTable::get(&daMP_DecodedTextureSetQueue);
+        const auto freeTextureSetQueue = MQSideTable::get(&daMP_FreeTextureSetQueue);
+        const auto decodedAudioBufferQueue = MQSideTable::get(&daMP_DecodedAudioBufferQueue);
+        const auto freeAudioBufferQueue = MQSideTable::get(&daMP_FreeAudioBufferQueue);
+
+        ImGui::Text("daMP_ReadedBufferQueue: %ld", readBufQueue->msgCount());
+        ImGui::Text("daMP_ReadedBufferQueue2: %ld", readBufQueue2->msgCount());
+        ImGui::Text("daMP_FreeReadBufferQueue: %ld", freeReadBufQueue->msgCount());
+        ImGui::Text("daMP_DecodedTextureSetQueue: %ld", decodedTextureSetQueue->msgCount());
+        ImGui::Text("daMP_FreeTextureSetQueue: %ld", freeTextureSetQueue->msgCount());
+        ImGui::Text("daMP_DecodedAudioBufferQueue: %ld", decodedAudioBufferQueue->msgCount());
+        ImGui::Text("daMP_FreeAudioBufferQueue: %ld", freeAudioBufferQueue->msgCount());
     }
 
     ImGui::End();
@@ -4485,6 +4534,9 @@ int daMP_c::daMP_c_Init() {
 #if !TARGET_PC // We don't properly simulate retrace interval so this doesn't work.
     mDoGph_gInf_c::setFrameRate(1);
 #endif
+#if TARGET_PC
+    gTHPHeap = std::make_unique<PCHeap<HEAP_CAPACITY>>();
+#endif
     daMP_Fail_alloc = FALSE;
 
     int demoNo = daMP_c_Get_arg_demoNo();
@@ -4514,6 +4566,7 @@ int daMP_c::daMP_c_Init() {
 int daMP_c::daMP_c_Finish() {
     daMP_ActivePlayer_Finish();
     m_myObj = NULL;
+    gTHPHeap.reset(nullptr);
     return 1;
 }
 

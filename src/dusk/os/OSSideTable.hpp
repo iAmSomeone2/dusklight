@@ -10,7 +10,8 @@
 #include <mutex>
 
 #include <dolphin/os/OSMutex.h>
-#include "PCDataRegistry.hpp"
+#include "../pc/PCDataRegistry.hpp"
+#include "../pc/PCMessageQueue.hpp"
 
 /**
  * @brief Contention-free re-implementation of the message queue side-table system used in
@@ -36,8 +37,9 @@
  *                function must be specialized for each GCType.
  * @tparam PCData The associated data type used by porting code for managing additional information
  *                 related to the given GCType object.
+ * @tparam PCDataArgs The argument types used to construct PCData
  */
-template <typename GCType, typename PCData>
+template <typename GCType, typename PCData, typename... PCDataArgs>
 class OSSideTable {
 public:
     /** Get a reference to the lower 4-bytes of the dead field (4-bytes aligned) to use as
@@ -50,7 +52,7 @@ public:
      */
     static uint32_t& slot(GCType *obj);
 
-    /** Retrieve the PCData associated with the given GCType object.
+    /** Retrieve the PCData associated with the given GCType object if it exists.
      *
      * @param obj The object for which to retrieve the associated PCData.
      * @return the associated PCData object or `nullptr` if not found.
@@ -60,7 +62,52 @@ public:
         if (const auto handle = cachedSlot.load(std::memory_order_acquire); handle) {
             return registry().resolve(handle);
         }
-        return slowPath(obj);
+        return nullptr;
+    }
+
+    /** Retrieve the PCData associated with the given GCType object or initialize the data if it
+     * doesn't exist yet.
+     *
+     * @param obj The object for which to retrieve the associated PCData.
+     * @param args The arguments used to construct PCData
+     * @return the existing or newly created associated PCData object.
+     */
+    static PCData* getOrInit(GCType *obj, PCDataArgs... args) {
+        if (PCData* data = OSSideTable::get(obj)) {
+            return data;
+        }
+        return initPCData(obj, args...);
+    }
+
+
+    /// Creates a new PCData object for the provided GCType and associates it with the object.
+    /// This caches the handle in the map and updates the slot so that future lookups can reuse it.
+    ///
+    /// @param obj The GCType object to associate with the new PCData.
+    /// @param args
+    /// @return The newly created PCData object.
+    static PCData* initPCData(GCType* obj, PCDataArgs... args) {
+        std::lock_guard lock(mapMutex());
+
+        // Ensure that another thread hasn't already updated the cache
+        const std::atomic_ref<uint32_t> cachedSlot(slot(obj));
+        if (const auto handle = cachedSlot.load(std::memory_order_acquire); handle) {
+            return registry().resolve(handle);
+        }
+
+        // NOTE: It's probably best to assume here that the backing map does not have stale data.
+        // A different mechanism should be added to allow on-demand cleanup of stale data.
+
+        // Create new PCData object for the provided GCType
+        auto data = new PCData(args...);
+        uint32_t handle = registry().add(data);
+        if (map().contains(obj)) {
+            map().erase(obj);
+        }
+        map().emplace(obj, handle);
+
+        cachedSlot.store(handle, std::memory_order_release);
+        return data;
     }
 
     /** Iterate all live entries under the map lock; executing the provided function for each.
@@ -81,37 +128,6 @@ public:
     }
 
 private:
-    /// Creates a new PCData object for the provided GCType and associates it with the object.
-    /// This caches the handle in the map and updates the slot so that future lookups can reuse it.
-    ///
-    /// @param obj The GCType object to associate with the new PCData.
-    /// @return The newly created PCData object.
-    static PCData* slowPath(GCType* obj) {
-        std::lock_guard lock(mapMutex());
-
-        // Ensure that another thread hasn't already updated the cache
-        const std::atomic_ref<uint32_t> cachedSlot(slot(obj));
-        if (const auto handle = cachedSlot.load(std::memory_order_acquire); handle) {
-            return registry().resolve(handle);
-        }
-
-        // Re-initializing the same associated object (ex. OSMessageQueue) nulls its slot but doesn't
-        // clear a handle in the map. When that happens, we should try to locate the handle in the
-        // map for reuse.
-        if (const auto it = map().find(obj); it != map().end()) {
-            cachedSlot.store(it->second, std::memory_order_release);
-            return registry().resolve(it->second);
-        }
-
-        // Create new PCData object for the provided GCType
-        auto data = new PCData();
-        uint32_t handle = registry().add(data);
-        map().emplace(obj, handle);
-
-        cachedSlot.store(handle, std::memory_order_release);
-        return data;
-    }
-
     // Function-local statics are used here to avoid race conditions during initialization.
 
     /// Backing registry for the PCData objects.
@@ -140,6 +156,10 @@ private:
         return mapMutex;
     }
 };
+
+// template <>
+// // ReSharper disable twice CppParameterNamesMismatch new names make more sense in this specific context
+// inline PCMessageQueue* OSSideTable<OSMessageQueue, PCMessageQueue, size_t>::initPCData(OSMessageQueue* mq, size_t capacity);
 
 /// Forward declaration of PCMutexData from 'OSMutex.cpp'
 struct PCMutexData;
