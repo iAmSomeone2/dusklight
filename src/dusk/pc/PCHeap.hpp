@@ -27,7 +27,7 @@ struct AllocStats {
     std::atomic<size_t> alloc_count{0};
 
     void on_alloc(const std::size_t size) noexcept {
-        const auto now = this->bytes_in_use.fetch_add(size, std::memory_order_relaxed);
+        const auto now = this->bytes_in_use.fetch_add(size, std::memory_order_relaxed) + size;
         auto prev_hwm = this->high_water_mark.load(std::memory_order_acquire);
 
         while (now > prev_hwm && !this->high_water_mark.compare_exchange_weak(
@@ -66,7 +66,7 @@ private:
 
         const auto current_bytes_in_use =
             static_cast<int64_t>(this->bytes_in_use.load(std::memory_order_acquire));
-        TracyMessageL(log_msg.c_str());
+        TracyMessage(log_msg.c_str(), log_msg.length());
         TracyPlot("[PCHeap] allocated bytes", current_bytes_in_use);
 
         const auto hwm =
@@ -95,16 +95,16 @@ class PCHeap : public std::pmr::memory_resource {
 #endif
 
     /// The backing memory pool aligned to the target architecture's cache line size.
-    alignas(std::hardware_destructive_interference_size) std::byte pool[CAPACITY]{};
+    alignas(std::hardware_destructive_interference_size) std::byte pool[CAPACITY];
 
     /// The current cursor into the memory pool.
-    std::byte* cursor{this->pool};
+    std::atomic_uintptr_t cursor{reinterpret_cast<uintptr_t>(this->pool)};
 
 public:
     PCHeap() = default;
 
     ~PCHeap() override {
-        // No-op given that the pool is statically allocated
+
     }
 
     PCHeap(const PCHeap&) = delete;
@@ -115,7 +115,7 @@ public:
      * Reset the heap, freeing all allocated memory.
      */
     void reset() noexcept {
-        this->cursor = this->pool;
+        this->cursor.store(reinterpret_cast<uintptr_t>(this->pool), std::memory_order_release);
 #if TRACY_ENABLE
         this->alloc_stats.reset_bytes_in_use();
 #endif
@@ -133,7 +133,10 @@ public:
      *
      * @return Number of bytes currently allocated from this heap.
      */
-    size_t in_use() const noexcept { return static_cast<size_t>(this->cursor - this->pool); }
+    size_t in_use() const noexcept {
+        const auto cursor_val = this->cursor.load(std::memory_order_acquire);
+        return static_cast<size_t>(cursor_val - reinterpret_cast<uintptr_t>(this->pool));
+    }
 
     /**
      * Get the number of bytes currently available for allocation from this heap.
@@ -142,24 +145,41 @@ public:
      */
     size_t available() const noexcept { return CAPACITY - this->in_use(); }
 
-    template <typename T>
-    static std::pmr::polymorphic_allocator<T> make_allocator() {
-        return std::pmr::polymorphic_allocator<T>(new PCHeap());
+    /**
+     * Exception-free allocate
+     *
+     * @param bytes number of bytes to allocate
+     * @param alignment alignment of the allocated memory
+     * @return pointer to allocated memory or nullptr if allocation failed
+     */
+    void* try_allocate(const size_t bytes, const size_t alignment = alignof(std::max_align_t)) noexcept {
+        try {
+            return this->allocate(bytes, alignment);
+        } catch (const std::bad_alloc&) {
+            return nullptr;
+        }
     }
-
 private:
     void* do_allocate(const std::size_t bytes, const std::size_t alignment) override {
-        auto aligned = align_up(this->cursor, alignment);
-        auto next = aligned + bytes;
-        if (next > this->pool + CAPACITY) {
-            // Not enough space.
-            throw std::bad_alloc{};
-        }
-        this->cursor = next;
+        // Validate that alignment is a power of two
+        assert((alignment & (alignment-1)) == 0);
+
+        for (;;) {
+            auto addr = this->cursor.load(std::memory_order_relaxed);
+            const auto aligned = align_up(addr, alignment);
+            auto next = aligned + bytes;
+            if (next > this->pool + CAPACITY) {
+                // Not enough space.
+                throw std::bad_alloc{};
+            }
+            if (!this->cursor.compare_exchange_strong(addr, reinterpret_cast<uintptr_t>(next), std::memory_order_release, std::memory_order_relaxed)) {
+                continue;
+            }
 #if TRACY_ENABLE
-        this->alloc_stats.on_alloc(bytes);
+            this->alloc_stats.on_alloc(bytes);
 #endif
-        return aligned;
+            return aligned;
+        }
     }
 
     void do_deallocate(void*, std::size_t, std::size_t) override {
@@ -173,13 +193,11 @@ private:
     /**
      * Aligns a pointer up to the given alignment.
      *
-     * @param ptr Pointer to align.
      * @param alignment Alignment to align to.
      * @return Aligned pointer.
      */
-    static std::byte* align_up(std::byte* ptr, const std::size_t alignment) {
-        const auto addr = reinterpret_cast<std::uintptr_t>(ptr);
-        const auto aligned = (addr + (alignment - 1)) & ~(alignment - 1);
+    static std::byte* align_up(const uintptr_t ptr, const std::size_t alignment) {
+        const auto aligned = (ptr + (alignment - 1)) & ~(alignment - 1);
         return reinterpret_cast<std::byte*>(aligned);
     }
 };

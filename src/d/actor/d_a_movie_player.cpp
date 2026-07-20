@@ -24,10 +24,10 @@
 
 #include <cassert>
 
-#include "../../dusk/pc/PCMessageQueue.hpp"
+#include "dusk/pc/PCMessageQueue.hpp"
 #include "dusk/os/OSSideTable.hpp"
 // TEMP DIAGNOSTIC (Tracy) — remove before commit
-#include "tracy/Tracy.hpp"
+#include <tracy/Tracy.hpp>
 #include "f_op/f_op_overlap_mng.h"
 
 #include "JSystem/JAudio2/JASCriticalSection.h"
@@ -4346,7 +4346,7 @@ static BOOL daMP_ActivePlayer_Init(char const* moviePath) {
 
     daMP_buffer = mDoExt_getArchiveHeap()->alloc(daMP_THPPlayerCalcNeedMemory(), 0x20);
 #else
-    daMP_buffer = gTHPHeap->allocate(daMP_THPPlayerCalcNeedMemory(), 0x20);
+    daMP_buffer = gTHPHeap->try_allocate(daMP_THPPlayerCalcNeedMemory(), 0x20);
 #endif
     if (daMP_buffer == NULL) {
         OSReport("Can't allocate the memory");
