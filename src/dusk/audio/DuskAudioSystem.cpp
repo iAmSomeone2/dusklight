@@ -101,11 +101,6 @@ void SDLCALL GetNewAudio(
     int needed,
     int) {
     FrameMarkStart(FrameName);
-#ifdef TRACY_ENABLE
-    // TEMP DIAGNOSTIC — remove before commit. Device-side buffer level when SDL asks for more:
-    // sustained ~0 here while crackling = the callback is being serviced too late (mechanism A).
-    TracyPlot("SDLAudioQueuedBytes", static_cast<int64_t>(SDL_GetAudioStreamQueued(PlaybackStream)));
-#endif
     while (needed > 0) {
         const int rendered = RenderNewAudioFrame();
         needed -= rendered;

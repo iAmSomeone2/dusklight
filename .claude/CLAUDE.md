@@ -73,4 +73,4 @@ From `docs/code-conventions.md`:
 - ALWAYS assume that notes may be used by other maintainers. They should be written in a way which addresses project developers in general terms.
   Additionally, avoid referring to files existing outside the project. Instead, provided relevant summarized snippets. 
 - ALWAYS place generated notes in the 'notes/' directory.
-- ALWAYS include an appropriate disclaimer in files under the 'notes/' when they have been authored by you. 
+- ALWAYS include an appropriate disclaimer in files under the 'notes/' when they have been authored by you.

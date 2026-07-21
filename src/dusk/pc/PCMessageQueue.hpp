@@ -69,7 +69,7 @@ class PCMessageQueue {
 
     bool tryPop(OSMessage* ret);
 public:
-    explicit PCMessageQueue(size_t capacity);
+    explicit PCMessageQueue(size_t requested_capacity);
 
     ~PCMessageQueue();
 

@@ -53,7 +53,7 @@ struct MessageCell {
 };
 
 
-PCMessageQueue::PCMessageQueue(const size_t capacity): capacity(capacity) {
+PCMessageQueue::PCMessageQueue(const size_t requested_capacity): capacity(requested_capacity) {
     if (this->capacity == 0) {
         this->cells = nullptr;
         return;
@@ -63,7 +63,7 @@ PCMessageQueue::PCMessageQueue(const size_t capacity): capacity(capacity) {
         this->capacity = 2;
     }
 
-    this->cells = new MessageCell*[capacity];
+    this->cells = new MessageCell*[this->capacity];
     for (size_t i = 0; i < this->capacity; i++) {
         const auto cell = new MessageCell { i, nullptr };
         this->cells[i] = cell;
@@ -134,7 +134,7 @@ bool PCMessageQueue::tryPush(const OSMessage value) {
 }
 
 bool PCMessageQueue::push(const OSMessage value, const bool shouldBlock) {
-    if (this->msgCapacity() == 0) {
+    if (this->capacity == 0) {
         // No capacity, cannot push
         return false;
     }
@@ -212,11 +212,8 @@ bool PCMessageQueue::tryPop(OSMessage* ret) {
 
 bool PCMessageQueue::pop(OSMessage* ret, const bool shouldBlock) {
     if (this->capacity == 0) {
-        // Don't return a message if the queue is empty
-        if (ret) {
-            *ret = nullptr;
-        }
-        return true;
+        // There is no capacity, so there's never a message to pop
+        return false;
     }
 
     for (;;) {
@@ -258,7 +255,7 @@ bool PCMessageQueue::pop(OSMessage* ret, const bool shouldBlock) {
 }
 
 bool PCMessageQueue::jam(const OSMessage value, const bool shouldBlock) {
-    if (this->msgCapacity() == 0) {
+    if (this->capacity == 0) {
         // There is *technically* no capacity, so we can't insert
         return false;
     }
@@ -271,8 +268,11 @@ bool PCMessageQueue::jam(const OSMessage value, const bool shouldBlock) {
             return false;
         }
 
-        // slot is empty, so we can insert
-        this->jamSlot.compare_exchange_strong(slot, value, std::memory_order_release, std::memory_order_acquire);
+        // slot is empty, so we can try to insert
+        if (!this->jamSlot.compare_exchange_strong(slot, value, std::memory_order_release, std::memory_order_acquire)) {
+            // Another thread beat us to it
+            return false;
+        }
         this->recvEC.signal();
         return true;
     };

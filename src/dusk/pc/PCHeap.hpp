@@ -1,11 +1,11 @@
-//
-// Created by Brenden Davidson on 7/20/26.
-//
+/**
+ *
+ */
 
 #pragma once
 
 #include <atomic>
-#include <cstdint>
+#include <array>
 #include <memory_resource>
 
 #if TRACY_ENABLE
@@ -17,6 +17,10 @@
 namespace dusk::pc {
 #if TRACY_ENABLE
 enum AllocEventType : uint8_t { ALLOC, FREE, RESET };
+
+#define BYTES_PLOT_NAME "[PCHeap] Bytes in Use"
+#define HWM_PLOT_NAME "[PCHeap] High Water Mark"
+#define ALLOC_PLOT_NAME "[PCHeap] Allocations"
 
 /**
  * Debug allocation statistics
@@ -49,6 +53,12 @@ struct AllocStats {
         this->write_to_tracy(RESET, 0);
     }
 
+    ~AllocStats() {
+        constexpr int64_t zero = 0;
+        TracyPlot(BYTES_PLOT_NAME, zero);
+        TracyPlot(HWM_PLOT_NAME, zero);
+        TracyPlot(ALLOC_PLOT_NAME, zero);
+    }
 private:
     void write_to_tracy(const AllocEventType event_type, const std::size_t size) const noexcept {
         std::string log_msg;
@@ -67,14 +77,14 @@ private:
         const auto current_bytes_in_use =
             static_cast<int64_t>(this->bytes_in_use.load(std::memory_order_acquire));
         TracyMessage(log_msg.c_str(), log_msg.length());
-        TracyPlot("[PCHeap] allocated bytes", current_bytes_in_use);
+        TracyPlot(BYTES_PLOT_NAME, current_bytes_in_use);
 
         const auto hwm =
             static_cast<int64_t>(this->high_water_mark.load(std::memory_order_acquire));
-        TracyPlot("[PCHeap] high water mark (bytes)", hwm);
+        TracyPlot(HWM_PLOT_NAME, hwm);
 
         const auto allocs = static_cast<int64_t>(this->alloc_count.load(std::memory_order_acquire));
-        TracyPlot("[PCHeap] alloc count", allocs);
+        TracyPlot(ALLOC_PLOT_NAME, allocs);
     }
 };
 #endif
@@ -88,24 +98,29 @@ private:
  *
  * @tparam CAPACITY The capacity of the heap in bytes.
  */
-template <const size_t CAPACITY>
+template<const size_t CAPACITY>
 class PCHeap : public std::pmr::memory_resource {
+    /// The backing memory pool aligned to the target architecture's cache line size.
+    alignas(std::hardware_destructive_interference_size) std::array<std::byte, CAPACITY> pool;
+
+    /// The current cursor into the memory pool.
+    std::atomic_uintptr_t cursor{reinterpret_cast<uintptr_t>(this->pool.data())};
+
 #if TRACY_ENABLE
     AllocStats alloc_stats{};
 #endif
-
-    /// The backing memory pool aligned to the target architecture's cache line size.
-    alignas(std::hardware_destructive_interference_size) std::byte pool[CAPACITY];
-
-    /// The current cursor into the memory pool.
-    std::atomic_uintptr_t cursor{reinterpret_cast<uintptr_t>(this->pool)};
-
 public:
-    PCHeap() = default;
+    PCHeap() : memory_resource(*std::pmr::null_memory_resource()) {
+#if TRACY_ENABLE
+        TracyMessageL("PCHeap created");
+#endif
+    };
 
+#if TRACY_ENABLE
     ~PCHeap() override {
-
+        TracyMessageL("PCHeap destroyed");
     }
+#endif
 
     PCHeap(const PCHeap&) = delete;
 
@@ -115,7 +130,7 @@ public:
      * Reset the heap, freeing all allocated memory.
      */
     void reset() noexcept {
-        this->cursor.store(reinterpret_cast<uintptr_t>(this->pool), std::memory_order_release);
+        this->cursor.store(reinterpret_cast<uintptr_t>(this->pool.data()), std::memory_order_release);
 #if TRACY_ENABLE
         this->alloc_stats.reset_bytes_in_use();
 #endif
@@ -135,7 +150,7 @@ public:
      */
     size_t in_use() const noexcept {
         const auto cursor_val = this->cursor.load(std::memory_order_acquire);
-        return static_cast<size_t>(cursor_val - reinterpret_cast<uintptr_t>(this->pool));
+        return static_cast<size_t>(cursor_val - reinterpret_cast<uintptr_t>(this->pool.data()));
     }
 
     /**
@@ -155,7 +170,10 @@ public:
     void* try_allocate(const size_t bytes, const size_t alignment = alignof(std::max_align_t)) noexcept {
         try {
             return this->allocate(bytes, alignment);
-        } catch (const std::bad_alloc&) {
+        } catch (const std::bad_alloc& err) {
+#if TRACY_ENABLE
+            TracyLogString(tracy::MessageSeverity::Error, tracy::Color::Red, 0, err.what());
+#endif
             return nullptr;
         }
     }
@@ -168,7 +186,7 @@ private:
             auto addr = this->cursor.load(std::memory_order_relaxed);
             const auto aligned = align_up(addr, alignment);
             auto next = aligned + bytes;
-            if (next > this->pool + CAPACITY) {
+            if (next > this->pool.data() + CAPACITY) {
                 // Not enough space.
                 throw std::bad_alloc{};
             }
@@ -193,6 +211,7 @@ private:
     /**
      * Aligns a pointer up to the given alignment.
      *
+     * @param ptr Pointer to align.
      * @param alignment Alignment to align to.
      * @return Aligned pointer.
      */

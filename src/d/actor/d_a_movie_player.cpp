@@ -14,7 +14,6 @@
 #pragma optimization_level 4
 #pragma optimize_for_size off
 
-#include <cstring>
 #include <span>
 #include "JSystem/JAudio2/JASAiCtrl.h"
 #include "JSystem/JAudio2/JASDriverIF.h"
@@ -26,18 +25,22 @@
 
 #include "dusk/pc/PCMessageQueue.hpp"
 #include "dusk/os/OSSideTable.hpp"
-// TEMP DIAGNOSTIC (Tracy) — remove before commit
-#include <tracy/Tracy.hpp>
+
+
 #include "f_op/f_op_overlap_mng.h"
 
 #include "JSystem/JAudio2/JASCriticalSection.h"
 
 #if TARGET_PC
 #include <memory>
+#include <memory_resource>
 #include "dusk/gx_helper.h"
 #include "dusk/os.h"
 #include "dusk/layout.hpp"
 #include "dusk/pc/PCHeap.hpp"
+#if TRACY_ENABLE
+#include <tracy/Tracy.hpp>
+#endif
 
 using MQSideTable = OSSideTable<OSMessageQueue, PCMessageQueue, size_t>;
 using dusk::pc::PCHeap;
@@ -2923,9 +2926,16 @@ void daMP_PushDecodedTextureSet(void* tex) {
     OSSendMessage(&daMP_DecodedTextureSetQueue, tex, 1);
 }
 
-static OSMessage daMP_FreeTextureSetMessage[THP_TEXTURE_SET_COUNT];
+#if TARGET_PC
+// Same case as audio buffers.
+static OSMessage* daMP_FreeTextureSetMessage = nullptr;
 
-static OSMessage daMP_DecodedTextureSetMessage[THP_TEXTURE_SET_COUNT];
+static OSMessage* daMP_DecodedTextureSetMessage = nullptr;
+#else
+static OSMessage daMP_FreeTextureSetMessage[3];
+
+static OSMessage daMP_DecodedTextureSetMessage[3];
+#endif
 
 static BOOL daMP_First;
 
@@ -3276,9 +3286,16 @@ static void* daMP_AudioDecoderForOnMemory(void* param_0) {
     return nullptr;
 }
 
-static OSMessage daMP_FreeAudioBufferMessage[THP_AUDIO_BUFFER_COUNT];
+#if TARGET_PC
+// Port-specific code no longer needs these arrays.
+static OSMessage* daMP_FreeAudioBufferMessage = nullptr;
 
-static OSMessage daMP_DecodedAudioBufferMessage[THP_AUDIO_BUFFER_COUNT];
+static OSMessage* daMP_DecodedAudioBufferMessage = nullptr;
+#else
+static OSMessage daMP_FreeAudioBufferMessage[3];
+
+static OSMessage daMP_DecodedAudioBufferMessage[3];
+#endif
 
 static BOOL daMP_CreateAudioDecodeThread(OSPriority prio, u8* param_1) {
 #if TARGET_PC
@@ -3519,8 +3536,7 @@ static void daMP_MixAudio(s16* destination, s16*, u32 sample) {
 		requestSample = sample;
 		dst = destination;
 
-#if TARGET_PC
-		// TEMP DIAGNOSTIC (Tracy) — remove before commit
+#if TARGET_PC && TRACY_ENABLE
 		if (const auto q = OSSideTable<OSMessageQueue, PCMessageQueue, size_t>::get(&daMP_DecodedAudioBufferQueue)) {
 			TracyPlot("DecodedAudioQueueDepth", static_cast<int64_t>(q->msgCount()));
 		}
@@ -3531,8 +3547,7 @@ static void daMP_MixAudio(s16* destination, s16*, u32 sample) {
 			do {
 				if (daMP_ActivePlayer.playAudioBuffer == (THPAudioBuffer*)NULL) {
 					if (!(daMP_ActivePlayer.playAudioBuffer = (THPAudioBuffer*)daMP_PopDecodedAudioBuffer(0))) {
-#if TARGET_PC
-						// TEMP DIAGNOSTIC (Tracy) — remove before commit
+#if TARGET_PC && TRACY_ENABLE
 						{
 							static int64_t sUnderruns = 0;
 							TracyMessageL("daMP_MixAudio underrun: silence fill");
@@ -4346,6 +4361,7 @@ static BOOL daMP_ActivePlayer_Init(char const* moviePath) {
 
     daMP_buffer = mDoExt_getArchiveHeap()->alloc(daMP_THPPlayerCalcNeedMemory(), 0x20);
 #else
+    const auto needed_mem = daMP_THPPlayerCalcNeedMemory();
     daMP_buffer = gTHPHeap->try_allocate(daMP_THPPlayerCalcNeedMemory(), 0x20);
 #endif
     if (daMP_buffer == NULL) {
@@ -4357,7 +4373,11 @@ static BOOL daMP_ActivePlayer_Init(char const* moviePath) {
         #endif
     }
 
+#if TARGET_PC
+    daMP_THPPlayerSetBuffer(static_cast<u8*>(daMP_buffer));
+#else
     daMP_THPPlayerSetBuffer((u8*)daMP_buffer);
+#endif
 
 #if TARGET_PC && MOVIE_SUPPORT
     assert(JpegDecompressHandle == nullptr);
@@ -4566,7 +4586,9 @@ int daMP_c::daMP_c_Init() {
 int daMP_c::daMP_c_Finish() {
     daMP_ActivePlayer_Finish();
     m_myObj = NULL;
+#if TARGET_PC
     gTHPHeap.reset(nullptr);
+#endif
     return 1;
 }
 
