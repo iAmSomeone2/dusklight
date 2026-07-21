@@ -32,9 +32,9 @@
 #include "JSystem/JAudio2/JASCriticalSection.h"
 
 #if TARGET_PC
+#include "helpers/gx_helper.h"
 #include <memory>
 #include <memory_resource>
-#include "dusk/gx_helper.h"
 #include "dusk/os.h"
 #include "dusk/layout.hpp"
 #include "dusk/pc/PCHeap.hpp"
@@ -4667,12 +4667,3 @@ DUSK_PROFILE actor_process_profile_definition DUSK_CONST g_profile_MOVIE_PLAYER 
 };
 
 AUDIO_INSTANCES;
-
-#if TARGET_PC
-void dusk::MoviePlayerShutdown() {
-    // We need to cleanly shut down the threads to avoid crashes on shutdown.
-    if (daMP_c::m_myObj) {
-        daMP_c::m_myObj->daMP_c_Finish();
-    }
-}
-#endif
