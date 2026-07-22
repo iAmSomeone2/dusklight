@@ -1,17 +1,32 @@
-//
-// Created by Brenden Davidson on 7/15/26.
-//
+/**
+ * @file PCMessageQueue.hpp
+ * @brief Bounded lock-free MPMC queue for ported platforms
+ *
+ * Based on Dmitry Vyukov's "Bounded MPMC queue" algorithm, this queue is capable of working fully
+ * lock-free on any platform supporting atomic operations.
+ *
+ * To ensure compatibility with existing GC code, both consumers and producers may optionally wait
+ * for space or messages to become available. Additionally, front-of-line insertion is supported
+ * through the use of a dedicated 'jamSlot' which preempts the queue's normal sequencing without
+ * violating the invariance requirements of Vyukov's algorithm.
+ *
+ * @author Brenden Davidson <brenden@bdavidson.dev>
+ * @date 2025-07-15
+ */
 
 #pragma once
 
-#include <thread>
 #include <condition_variable>
 #include <mutex>
 #include <atomic>
 
 #include <dolphin/os/OSMessage.h>
 
-#include "../os/reflection.h"
+#include "dusk/os/reflection.h"
+
+#if TRACY_ENABLE
+#include <tracy/Tracy.hpp>
+#endif
 
 /**
  * Wrapper struct used for sequencing stored messages with a PCMessageQueue.
@@ -25,7 +40,11 @@ struct EventCount {
 private:
     alignas(std::hardware_destructive_interference_size) std::atomic_size_t sequence = 0;
     std::atomic_size_t waitCount = 0;
+#if TRACY_ENABLE
+    TracyLockable(std::mutex, mutex);
+#else
     std::mutex mutex;
+#endif
     std::condition_variable cv;
 
 public:

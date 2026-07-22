@@ -95,7 +95,6 @@
 #include "dusk/discord_presence.hpp"
 #include "tracy/Tracy.hpp"
 #include "f_pc/f_pc_draw.h"
-#include "tracy/Tracy.hpp"
 #include <RmlUi/Core.h>
 #ifdef __APPLE__
 #include <TargetConditionals.h>
@@ -121,22 +120,6 @@ const int audioHeapSize = 0x14D800;
 // LOAD_COPYDATE - PC Version
 // =========================================================================
 #define COPYDATE_PATH "/str/Final/Release/COPYDATE"
-
-// #if TARGET_PC
-// bool dusk::IsRunning = true;
-// std::atomic_bool dusk::IsShuttingDown = false;
-// bool dusk::IsGameLaunched = false;
-// bool dusk::RestartRequested = false;
-// uint8_t dusk::SaveRequested = 0;
-// dusk::StageRequest dusk::StageRequested = {"",false};
-// std::filesystem::path dusk::ConfigPath;
-// std::filesystem::path dusk::CachePath;
-// #endif
-
-// void dusk::RequestRestart() noexcept {
-//     RestartRequested = SupportsProcessRestart;
-//     IsRunning = false;
-// }
 
 s32 LOAD_COPYDATE(void*) {
     char buffer[32];

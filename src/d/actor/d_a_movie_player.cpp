@@ -23,10 +23,6 @@
 
 #include <cassert>
 
-#include "dusk/pc/PCMessageQueue.hpp"
-#include "dusk/os/OSSideTable.hpp"
-
-
 #include "f_op/f_op_overlap_mng.h"
 
 #include "JSystem/JAudio2/JASCriticalSection.h"
@@ -38,6 +34,8 @@
 #include "dusk/os.h"
 #include "dusk/layout.hpp"
 #include "dusk/pc/PCHeap.hpp"
+#include "dusk/pc/PCMessageQueue.hpp"
+#include "dusk/os/OSSideTable.hpp"
 #if TRACY_ENABLE
 #include <tracy/Tracy.hpp>
 #endif
@@ -2777,11 +2775,11 @@ void daMP_PushReadedBuffer2(void* buffer) {
     OSSendMessage(&daMP_ReadedBufferQueue2, buffer, 1);
 }
 
-static OSMessage daMP_FreeReadBufferMessage[10];
+static OSMessage daMP_FreeReadBufferMessage[THP_READ_BUFFER_COUNT];
 
-static OSMessage daMP_ReadedBufferMessage[10];
+static OSMessage daMP_ReadedBufferMessage[THP_READ_BUFFER_COUNT];
 
-static OSMessage daMP_ReadedBufferMessage2[10];
+static OSMessage daMP_ReadedBufferMessage2[THP_READ_BUFFER_COUNT];
 
 static OSThread daMP_ReadThread;
 
@@ -4555,7 +4553,7 @@ int daMP_c::daMP_c_Init() {
     mDoGph_gInf_c::setFrameRate(1);
 #endif
 #if TARGET_PC
-    gTHPHeap = std::make_unique<PCHeap<HEAP_CAPACITY>>();
+    gTHPHeap = std::make_unique<PCHeap<HEAP_CAPACITY>>("THPHeap");
 #endif
     daMP_Fail_alloc = FALSE;
 

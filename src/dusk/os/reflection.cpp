@@ -1,7 +1,3 @@
-//
-// Created by Brenden Davidson on 7/15/26.
-//
-
 #include "reflection.h"
 
 bool isType(void* ptr, const ReflectiveType refType) {

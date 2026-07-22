@@ -1,7 +1,3 @@
-//
-// Created by Brenden Davidson on 7/15/26.
-//
-
 #include "dusk/pc/PCMessageQueue.hpp"
 #include <chrono>
 #include <condition_variable>
@@ -34,7 +30,12 @@ size_t EventCount::prepareWait() {
 }
 
 void EventCount::commitWait(const size_t ecSeq) {
+#if TRACY_ENABLE
+    std::unique_lock lock(this->mutex.m_lockable);
+#else
     std::unique_lock lock(this->mutex);
+#endif
+
     this->cv.wait(lock, [&]{ return this->sequence.load(std::memory_order_relaxed) != ecSeq || dusk::IsShuttingDown.load(std::memory_order_acquire); });
     this->waitCount.fetch_sub(1, std::memory_order_release);
 }

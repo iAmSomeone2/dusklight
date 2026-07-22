@@ -1,6 +1,10 @@
 /**
- * Contention-free re-implementation of the message queue side-table system used in
+ * @file OSSideTable.hpp
+ * @brief Contention-free re-implementation of the message queue side-table system used in
  * 'stubs.cpp'
+ *
+ * @author Brenden Davidson <brenden@bdavidson.dev>
+ * @date 2026-07-13
  */
 
 #pragma once
@@ -10,8 +14,7 @@
 #include <mutex>
 
 #include <dolphin/os/OSMutex.h>
-#include "../pc/PCDataRegistry.hpp"
-#include "../pc/PCMessageQueue.hpp"
+#include "dusk/pc/PCDataRegistry.hpp"
 
 /**
  * @brief Contention-free re-implementation of the message queue side-table system used in
@@ -96,7 +99,7 @@ public:
         }
 
         // NOTE: It's probably best to assume here that the backing map does not have stale data.
-        // A different mechanism should be added to allow on-demand cleanup of stale data.
+        // A different mechanism could be added to allow on-demand cleanup of stale data.
 
         // Create new PCData object for the provided GCType
         auto data = new PCData(args...);
@@ -156,10 +159,6 @@ private:
         return mapMutex;
     }
 };
-
-// template <>
-// // ReSharper disable twice CppParameterNamesMismatch new names make more sense in this specific context
-// inline PCMessageQueue* OSSideTable<OSMessageQueue, PCMessageQueue, size_t>::initPCData(OSMessageQueue* mq, size_t capacity);
 
 /// Forward declaration of PCMutexData from 'OSMutex.cpp'
 struct PCMutexData;

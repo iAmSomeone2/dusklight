@@ -1,6 +1,10 @@
-//
-// Created by Brenden Davidson on 7/13/26.
-//
+/**
+ * @file PCDataRegistry.hpp
+ * @brief The backing registry for contention-minimized management of PCData entries
+ *
+ * @author Brenden Davidson <brenden@bdavidson.dev>
+ * @date 2026-07-13
+ */
 
 #pragma once
 

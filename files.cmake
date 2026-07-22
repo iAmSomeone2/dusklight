@@ -1586,7 +1586,6 @@ set(DUSK_FILES
         src/dusk/achievements.cpp
         src/dusk/iso_validate.cpp
         src/dusk/livesplit.cpp
-#        src/dusk/offset_ptr.cpp
         src/dusk/mods/log_buffer.cpp
         src/dusk/mods/log_buffer.hpp
         src/dusk/mods/manifest.cpp
