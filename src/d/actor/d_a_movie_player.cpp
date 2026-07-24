@@ -3535,7 +3535,7 @@ static void daMP_MixAudio(s16* destination, s16*, u32 sample) {
 		dst = destination;
 
 #if TARGET_PC && TRACY_ENABLE
-		if (const auto q = OSSideTable<OSMessageQueue, PCMessageQueue, size_t>::get(&daMP_DecodedAudioBufferQueue)) {
+		if (const auto q = MQSideTable::get(&daMP_DecodedAudioBufferQueue)) {
 			TracyPlot("DecodedAudioQueueDepth", static_cast<int64_t>(q->msgCount()));
 		}
 #endif

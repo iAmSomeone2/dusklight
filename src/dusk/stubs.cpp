@@ -6,7 +6,6 @@
 #include <dusk/os/OSSideTable.hpp>
 #include <mutex>
 
-#include "os/reflection.h"
 #include "pc/PCMessageQueue.hpp"
 #include "tracy/Tracy.hpp"
 
@@ -67,9 +66,7 @@ uint32_t& MQSideTable::slot(OSMessageQueue* obj) {
 }
 
 static void WakeAllMsgQueueWaiters() {
-    MQSideTable::forEach([](PCMessageQueue& mq) {
-        mq.wakeAllWaiters();
-    });
+    MQSideTable::forEach([](PCMessageQueue& mq) { mq.wakeAllWaiters(); });
 }
 
 void OSInitMessageQueue(OSMessageQueue* mq, OSMessage*, const s32 msgCount) {
@@ -86,7 +83,7 @@ void OSInitMessageQueue(OSMessageQueue* mq, OSMessage*, const s32 msgCount) {
 }
 
 int OSSendMessage(OSMessageQueue* mq, void* msg, const s32 flags) {
-    const auto shouldBlock = flags != OS_MESSAGE_NOBLOCK;
+    const auto shouldBlock = (flags & OS_MESSAGE_BLOCK) == OS_MESSAGE_BLOCK;
 
     const auto pcMq = MQSideTable::get(mq);
     if (!pcMq)
@@ -96,7 +93,7 @@ int OSSendMessage(OSMessageQueue* mq, void* msg, const s32 flags) {
 }
 
 int OSReceiveMessage(OSMessageQueue* mq, OSMessage* msg, const s32 flags) {
-    const auto shouldBlock = flags != OS_MESSAGE_NOBLOCK;
+    const auto shouldBlock = (flags & OS_MESSAGE_BLOCK) == OS_MESSAGE_BLOCK;
 
     const auto pcMq = MQSideTable::get(mq);
     if (!pcMq)
@@ -106,7 +103,7 @@ int OSReceiveMessage(OSMessageQueue* mq, OSMessage* msg, const s32 flags) {
 }
 
 int OSJamMessage(OSMessageQueue* mq, void* msg, const s32 flags) {
-    const auto shouldBlock = flags != OS_MESSAGE_NOBLOCK;
+    const auto shouldBlock = (flags & OS_MESSAGE_BLOCK) == OS_MESSAGE_BLOCK;
 
     const auto pcMq = MQSideTable::get(mq);
     if (!pcMq)
