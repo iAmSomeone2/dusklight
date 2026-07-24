@@ -51,6 +51,16 @@
       }
     },
     {
+      "name": "tsan",
+      "hidden": true,
+      "cacheVariables": {
+        "ENABLE_TSAN": {
+          "type": "BOOL",
+          "value": true
+        }
+      }
+    },
+    {
       "name": "linux-default",
       "displayName": "Linux (default)",
       "generator": "Ninja",
@@ -95,6 +105,15 @@
       ]
     },
     {
+      "name": "linux-default-debug-tsan",
+      "displayName": "Linux (default) Debug TSan",
+      "inherits": [
+        "debug",
+        "linux-default",
+        "tsan"
+      ]
+    },
+    {
       "name": "linux-default-relwithdebinfo",
       "displayName": "Linux (default) RelWithDebInfo",
       "inherits": [
@@ -128,6 +147,15 @@
         "debug",
         "linux-clang",
         "asan"
+      ]
+    },
+    {
+      "name": "linux-clang-debug-tsan",
+      "displayName": "Linux (Clang) Debug TSan",
+      "inherits": [
+        "debug",
+        "linux-clang",
+        "tsan"
       ]
     },
     {
@@ -237,6 +265,15 @@
       ]
     },
     {
+      "name": "windows-clang-debug-tsan",
+      "displayName": "Windows (Clang) Debug TSan",
+      "inherits": [
+        "debug",
+        "windows-clang",
+        "tsan"
+      ]
+    },
+    {
       "name": "windows-clang-relwithdebinfo",
       "displayName": "Windows (Clang) RelWithDebInfo",
       "inherits": [
@@ -285,6 +322,15 @@
         "debug",
         "macos-default",
         "asan"
+      ]
+    },
+    {
+      "name": "macos-default-debug-tsan",
+      "displayName": "macOS (default) Debug TSan",
+      "inherits": [
+        "debug",
+        "macos-default",
+        "tsan"
       ]
     },
     {
@@ -603,6 +649,12 @@
       "displayName": "Linux (default) Debug ASan"
     },
     {
+      "name": "linux-default-debug-tsan",
+      "configurePreset": "linux-default-debug-tsan",
+      "description": "Linux (default) debug build with ThreadSanitizer",
+      "displayName": "Linux (default) Debug TSan"
+    },
+    {
       "name": "linux-default-relwithdebinfo",
       "configurePreset": "linux-default-relwithdebinfo",
       "description": "Linux (default) release build with debug info",
@@ -621,6 +673,12 @@
       "displayName": "Linux (Clang) Debug ASan"
     },
     {
+      "name": "linux-clang-debug-tsan",
+      "configurePreset": "linux-clang-debug-tsan",
+      "description": "Linux (Clang) debug build with ThreadSanitizer",
+      "displayName": "Linux (Clang) Debug TSan"
+    },
+    {
       "name": "linux-clang-relwithdebinfo",
       "configurePreset": "linux-clang-relwithdebinfo",
       "description": "Linux (Clang) release build with debug info",
@@ -637,6 +695,12 @@
       "configurePreset": "macos-default-debug-asan",
       "description": "macOS debug build with AddressSanitizer",
       "displayName": "macOS Debug ASan"
+    },
+    {
+      "name": "macos-default-debug-tsan",
+      "configurePreset": "macos-default-debug-tsan",
+      "description": "macOS debug build with ThreadSanitizer",
+      "displayName": "macOS Debug TSan"
     },
     {
       "name": "macos-default-relwithdebinfo",
@@ -712,6 +776,12 @@
       "configurePreset": "windows-clang-debug",
       "description": "Windows (Clang) debug build",
       "displayName": "Windows (Clang) Debug"
+    },
+    {
+      "name": "windows-clang-debug-tsan",
+      "configurePreset": "windows-clang-debug-tsan",
+      "description": "Windows (Clang) debug build with ThreadSanitizer",
+      "displayName": "Windows (Clang) Debug TSan"
     },
     {
       "name": "windows-clang-relwithdebinfo",
