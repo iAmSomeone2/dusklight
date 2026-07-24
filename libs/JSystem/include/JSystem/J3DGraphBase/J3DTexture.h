@@ -8,12 +8,20 @@
 #include <stdint.h>
 
 #include "helpers/gx_helper.h"
+#if TARGET_PC
+#include "JSystem/JKernel/JKRDisposer.h"
+#endif
 
 /**
  * @ingroup jsystem-j3d
  *
  */
-class J3DTexture {
+class J3DTexture
+#if TARGET_PC
+// Ensures that the allocated memory is properly disposed of on ported systems
+    : public JKRDisposer
+#endif
+{
 private:
     /* 0x0 */ u16 mNum;
     /* 0x2 */ u16 unk_0x2;
@@ -35,8 +43,8 @@ public:
         mpImgDataPtr = new u8*[num];
         mpTlutDataPtr = new u8*[num];
         for (u16 i = 0; i < num; i++) {
-            mpImgDataPtr[i] = (u8*)(&mpRes[i]) + mpRes[i].imageOffset;
-            mpTlutDataPtr[i] = (u8*)(&mpRes[i]) + mpRes[i].paletteOffset;
+            mpImgDataPtr[i] = reinterpret_cast<u8*>(&mpRes[i]) + mpRes[i].imageOffset;
+            mpTlutDataPtr[i] = reinterpret_cast<u8*>(&mpRes[i]) + mpRes[i].paletteOffset;
             loadGXTexObj(i);
         }
 #endif
@@ -65,7 +73,7 @@ public:
     }
 
 #if TARGET_PC
-    u8* getImgDataPtr(u16 index) const {
+    [[nodiscard]] u8* getImgDataPtr(const u16 index) const {
         return mpImgDataPtr[index];
     }
 #endif

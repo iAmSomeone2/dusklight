@@ -1,11 +1,12 @@
 #pragma once
 
 #include <filesystem>
+#include <atomic>
 
 namespace dusk {
 
 extern bool IsRunning;
-extern bool IsShuttingDown;
+extern std::atomic_bool IsShuttingDown;
 extern bool IsGameLaunched;
 extern bool RestartRequested;
 extern std::filesystem::path ConfigPath;
