@@ -42,7 +42,7 @@ struct PCThreadData {
     bool suspended = false;
 
     ~PCThreadData() {
-        if (dusk::IsShuttingDown && nativeThread.joinable()) {
+        if (dusk::IsShuttingDown.load(std::memory_order_acquire) && nativeThread.joinable()) {
             // Don't care about threads if we're shutting down.
             nativeThread.detach();
         }

@@ -114,7 +114,7 @@ void mDoMemCd_Ctrl_c::main() {
         OSLockMutex(&mMutex);
         while (mCardCommand == COMM_NONE_e
 #ifdef TARGET_PC
-            && !dusk::IsShuttingDown
+            && !dusk::IsShuttingDown.load(std::memory_order_acquire)
 #endif
         ) {
             OSWaitCond(&mCond, &mMutex);
@@ -122,7 +122,7 @@ void mDoMemCd_Ctrl_c::main() {
         OSUnlockMutex(&mMutex);
 
 #ifdef TARGET_PC
-        if (dusk::IsShuttingDown) {
+        if (dusk::IsShuttingDown.load(std::memory_order_acquire)) {
             break;
         }
 #endif

@@ -1,18 +1,13 @@
+#include <condition_variable>
 #include <dolphin/dolphin.h>
 #include <dolphin/gx.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
-#include <cstdlib>
-#include <cstdint>
-#include <memory>
-#include <mutex>
-#include <condition_variable>
-#include <unordered_map>
-#include <memory>
 #include <dusk/logging.h>
 #include <dusk/main.h>
+#include <dusk/os/OSSideTable.hpp>
+#include <mutex>
 
+#include "os/reflection.h"
+#include "pc/PCMessageQueue.hpp"
 #include "tracy/Tracy.hpp"
 
 #ifndef _WIN32
@@ -41,7 +36,6 @@ static LARGE_INTEGER PerfFrequency;
 static bool PerfInitialized = false;
 #endif
 
-
 // ==========================================================================
 // General OS
 // ==========================================================================
@@ -65,118 +59,60 @@ struct PCMessageQueueData {
     std::condition_variable cvReceive;  // Notified when a message arrives
 };
 
-// Lazy-initialized to avoid DLL static init crashes
-static std::mutex& GetMsgQueueMapMutex() {
-    static std::mutex mtx;
-    return mtx;
-}
-static std::unordered_map<OSMessageQueue*, std::unique_ptr<PCMessageQueueData>>& GetMsgQueueMap() {
-    static std::unordered_map<OSMessageQueue*, std::unique_ptr<PCMessageQueueData>> map;
-    return map;
+using MQSideTable = OSSideTable<OSMessageQueue, PCMessageQueue, size_t>;
+
+template <>
+uint32_t& MQSideTable::slot(OSMessageQueue* obj) {
+    return reinterpret_cast<uint32_t&>(obj->queueSend.head);
 }
 
-static PCMessageQueueData& GetMsgQueueData(OSMessageQueue* mq) {
-    std::lock_guard<std::mutex> lock(GetMsgQueueMapMutex());
-    auto& map = GetMsgQueueMap();
-    auto it = map.find(mq);
-    if (it == map.end()) {
-        auto result = map.emplace(mq, std::make_unique<PCMessageQueueData>());
-        return *result.first->second;
-    }
-    return *it->second;
+static void WakeAllMsgQueueWaiters() {
+    MQSideTable::forEach([](PCMessageQueue& mq) {
+        mq.wakeAllWaiters();
+    });
 }
 
-static void ClearMsgQueueMap() {
-    std::lock_guard<std::mutex> lock(GetMsgQueueMapMutex());
-    auto& map = GetMsgQueueMap();
-    for (auto & [_, value] : map) {
-        value->cvReceive.notify_all();
-        value->cvSend.notify_all();
-    }
-    map.clear();
-}
-
-void OSInitMessageQueue(OSMessageQueue* mq, OSMessage* msgArray, s32 msgCount) {
-    if (!mq) return;
+void OSInitMessageQueue(OSMessageQueue* mq, OSMessage*, const s32 msgCount) {
+    if (!mq)
+        return;
     mq->queueSend.head = mq->queueSend.tail = nullptr;
     mq->queueReceive.head = mq->queueReceive.tail = nullptr;
-    mq->msgArray   = msgArray;
-    mq->msgCount   = msgCount;
+    mq->msgArray = nullptr;
+    mq->msgCount = msgCount;
     mq->firstIndex = 0;
-    mq->usedCount  = 0;
-    GetMsgQueueData(mq);  // Ensure side-table entry exists
+    mq->usedCount = 0;
+    const auto capacity = static_cast<size_t>(msgCount);
+    MQSideTable::initPCData(mq, capacity);
 }
 
-int OSSendMessage(OSMessageQueue* mq, void* msg, s32 flags) {
-    if (!mq) return 0;
+int OSSendMessage(OSMessageQueue* mq, void* msg, const s32 flags) {
+    const auto shouldBlock = flags != OS_MESSAGE_NOBLOCK;
 
-    PCMessageQueueData& data = GetMsgQueueData(mq);
-    std::unique_lock<std::mutex> lock(data.mtx);
-
-    if (mq->usedCount >= mq->msgCount) {
-        if (flags == OS_MESSAGE_NOBLOCK) return 0;
-        // BLOCK: wait until space is available
-        data.cvSend.wait(lock, [mq] { return mq->usedCount < mq->msgCount || dusk::IsShuttingDown; });
-    }
-    if (dusk::IsShuttingDown) {
+    const auto pcMq = MQSideTable::get(mq);
+    if (!pcMq)
         return 0;
-    }
 
-    s32 idx = (mq->firstIndex + mq->usedCount) % mq->msgCount;
-    ((OSMessage*)mq->msgArray)[idx] = msg;
-    mq->usedCount++;
-
-    data.cvReceive.notify_one();
-    return 1;
+    return pcMq->push(msg, shouldBlock);
 }
 
-BOOL OSReceiveMessage(OSMessageQueue* mq, OSMessage* msg, s32 flags) {
-    if (!mq) return 0;
+int OSReceiveMessage(OSMessageQueue* mq, OSMessage* msg, const s32 flags) {
+    const auto shouldBlock = flags != OS_MESSAGE_NOBLOCK;
 
-    PCMessageQueueData& data = GetMsgQueueData(mq);
-    std::unique_lock<std::mutex> lock(data.mtx);
-
-    if (mq->usedCount == 0) {
-        if (flags == OS_MESSAGE_NOBLOCK) return 0;
-        // BLOCK: wait until a message arrives
-        data.cvReceive.wait(lock, [mq] { return mq->usedCount > 0 || dusk::IsShuttingDown; });
-    }
-    if (dusk::IsShuttingDown) {
+    const auto pcMq = MQSideTable::get(mq);
+    if (!pcMq)
         return 0;
-    }
 
-    if (msg) {
-        *(OSMessage*)msg = ((OSMessage*)mq->msgArray)[mq->firstIndex];
-    }
-    mq->firstIndex = (mq->firstIndex + 1) % mq->msgCount;
-    mq->usedCount--;
-
-    data.cvSend.notify_one();
-    return 1;
+    return pcMq->pop(msg, shouldBlock);
 }
 
-int OSJamMessage(OSMessageQueue* mq, void* msg, s32 flags) {
-    if (!mq) return 0;
+int OSJamMessage(OSMessageQueue* mq, void* msg, const s32 flags) {
+    const auto shouldBlock = flags != OS_MESSAGE_NOBLOCK;
 
-    PCMessageQueueData& data = GetMsgQueueData(mq);
-    std::unique_lock<std::mutex> lock(data.mtx);
-
-    if (mq->usedCount >= mq->msgCount) {
-        if (flags == OS_MESSAGE_NOBLOCK) return 0;
-        // BLOCK: wait until space is available
-        data.cvSend.wait(lock, [mq] { return mq->usedCount < mq->msgCount || dusk::IsShuttingDown; });
-    }
-    if (dusk::IsShuttingDown) {
+    const auto pcMq = MQSideTable::get(mq);
+    if (!pcMq)
         return 0;
-    }
 
-    // Jam inserts at the front of the queue
-    mq->firstIndex = (mq->firstIndex - 1 + mq->msgCount) % mq->msgCount;
-    ((OSMessage*)mq->msgArray)[mq->firstIndex] = msg;
-    mq->usedCount++;
-
-    data.cvReceive.notify_one();
-    return 1;
+    return pcMq->jam(msg, shouldBlock);
 }
 
 // ==========================================================================
@@ -189,28 +125,42 @@ void OSCreateAlarm(OSAlarm* alarm) {}
 
 void OSCancelAlarm(OSAlarm* alarm) {}
 
-u16 OSGetFontEncode() { return 0; }
+u16 OSGetFontEncode() {
+    return 0;
+}
 
-char* OSGetFontTexture(char* string, void** image, s32* x, s32* y, s32* width) { return 0; }
-char* OSGetFontWidth(char* string, s32* width) { return 0; }
+char* OSGetFontTexture(char* string, void** image, s32* x, s32* y, s32* width) {
+    return 0;
+}
+char* OSGetFontWidth(char* string, s32* width) {
+    return 0;
+}
 
-BOOL OSGetResetButtonState() { return FALSE; }
-BOOL OSInitFont(OSFontHeader* fontData) { return FALSE; }
-BOOL OSLink(OSModuleInfo* newModule, void* bss) { return TRUE; }
+BOOL OSGetResetButtonState() {
+    return FALSE;
+}
+BOOL OSInitFont(OSFontHeader* fontData) {
+    return FALSE;
+}
+BOOL OSLink(OSModuleInfo* newModule, void* bss) {
+    return TRUE;
+}
 
-void ClearCondMap();
+void WakeAllCondWaiters();
 void OSResetSystem(int reset, u32 resetCode, BOOL forceMenu) {
     OSReport("[PC] OSResetSystem called (reset=%d, code=%u)\n", reset, resetCode);
-    dusk::IsShuttingDown = true;
-    ClearMsgQueueMap();
-    ClearCondMap();
+    dusk::IsShuttingDown.store(true, std::memory_order_release);
+    WakeAllMsgQueueWaiters();
+    WakeAllCondWaiters();
 }
 
 void OSSetStringTable(void* stringTable) {}
-BOOL OSUnlink(OSModuleInfo* oldModule) { return FALSE; }
+BOOL OSUnlink(OSModuleInfo* oldModule) {
+    return FALSE;
+}
 
 void OSSwitchFiberEx(__REGISTER u32 param_0, __REGISTER u32 param_1, __REGISTER u32 param_2,
-                     __REGISTER u32 param_3, __REGISTER u32 code, __REGISTER u32 stack) {
+    __REGISTER u32 param_3, __REGISTER u32 code, __REGISTER u32 stack) {
     // On PC, call the function directly instead of switching stacks.
     // The PPC version switches to 'stack' and calls code(param_0, param_1).
     // Only caller is mDoPrintf_vprintf_Interrupt: OSSwitchFiberEx(fmt, args, 0, 0, vprintf, sp)
@@ -218,16 +168,28 @@ void OSSwitchFiberEx(__REGISTER u32 param_0, __REGISTER u32 param_1, __REGISTER 
     ((Func2)(uintptr_t)code)(param_0, param_1);
 }
 
-u32 __OSGetDIConfig() { return 0; }
-u32 OSGetProgressiveMode(void) { return 0; }
-u32 OSGetResetCode(void) { return 0; }
-BOOL OSGetResetSwitchState() { return FALSE; }
-BOOL OSLinkFixed(OSModuleInfo* newModule, void* bss) { return TRUE; }
+u32 __OSGetDIConfig() {
+    return 0;
+}
+u32 OSGetProgressiveMode(void) {
+    return 0;
+}
+u32 OSGetResetCode(void) {
+    return 0;
+}
+BOOL OSGetResetSwitchState() {
+    return FALSE;
+}
+BOOL OSLinkFixed(OSModuleInfo* newModule, void* bss) {
+    return TRUE;
+}
 void OSProtectRange(u32 chan, void* addr, u32 nBytes, u32 control) {}
 void OSSetPeriodicAlarm(OSAlarm* alarm, OSTime start, OSTime period, OSAlarmHandler handler) {}
 void OSSetProgressiveMode(u32 on) {}
 void OSSetSaveRegion(void* start, void* end) {}
-OSErrorHandler OSSetErrorHandler(OSError error, OSErrorHandler handler) { return NULL; }
+OSErrorHandler OSSetErrorHandler(OSError error, OSErrorHandler handler) {
+    return NULL;
+}
 void OSSetAlarm(OSAlarm* alarm, OSTime tick, OSAlarmHandler handler) {}
 
 #pragma mark SOUND
@@ -943,7 +905,7 @@ void GXClearGPMetric(void) {
     STUB_LOG();
 }
 void GXReadMemMetric(u32* cp_req, u32* tc_req, u32* cpu_rd_req, u32* cpu_wr_req, u32* dsp_req,
-                     u32* io_req, u32* vi_req, u32* pe_req, u32* rf_req, u32* fi_req) {
+    u32* io_req, u32* vi_req, u32* pe_req, u32* rf_req, u32* fi_req) {
     STUB_LOG();
 }
 void GXClearMemMetric(void) {
@@ -953,7 +915,7 @@ void GXClearVCacheMetric(void) {
     STUB_LOG();
 }
 void GXReadPixMetric(u32* top_pixels_in, u32* top_pixels_out, u32* bot_pixels_in,
-                     u32* bot_pixels_out, u32* clr_pixels_in, u32* copy_clks) {
+    u32* bot_pixels_out, u32* clr_pixels_in, u32* copy_clks) {
     STUB_LOG();
 }
 void GXClearPixMetric(void) {
@@ -1006,12 +968,12 @@ f32 GXGetYScaleFactor(u16 efbHeight, u16 xfbHeight) {
 }
 
 void GXInitTexCacheRegion(GXTexRegion* region, GXBool is_32b_mipmap, u32 tmem_even,
-                          GXTexCacheSize size_even, u32 tmem_odd, GXTexCacheSize size_odd) {
+    GXTexCacheSize size_even, u32 tmem_odd, GXTexCacheSize size_odd) {
     STUB_LOG();
 }
 // XXX, this should be some struct?
 // GXRenderModeObj GXNtsc480IntDf;
-//GXRenderModeObj GXNtsc480Int;
+// GXRenderModeObj GXNtsc480Int;
 void GXReadXfRasMetric(u32* xf_wait_in, u32* xf_wait_out, u32* ras_busy, u32* clocks) {
     STUB_LOG();
     *xf_wait_in = 0;
@@ -1186,5 +1148,7 @@ u32 JHICommBufReader::Header::getReadableSize() const {
 #pragma mark Decomp artifacts
 void stripFloat(f32) {}
 void stripDouble(f64) {}
-int getStripInt() { return 0; }
+int getStripInt() {
+    return 0;
+}
 void F(f32*) {}

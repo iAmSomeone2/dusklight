@@ -1414,10 +1414,17 @@ set(DUSK_FILES
         include/helpers/batch.hpp
         include/helpers/endian_gx.hpp
         src/d/actor/d_a_alink_dusk.cpp
-        src/dusk/OSContext.cpp
-        src/dusk/OSMutex.cpp
-        src/dusk/OSReport.cpp
-        src/dusk/OSThread.cpp
+        src/dusk/os/OSContext.cpp
+        src/dusk/os/OSMutex.cpp
+        src/dusk/os/OSReport.cpp
+        src/dusk/os/OSThread.cpp
+        src/dusk/os/OSSideTable.hpp
+        src/dusk/os/reflection.h
+        src/dusk/os/reflection.cpp
+        src/dusk/pc/PCDataRegistry.hpp
+        src/dusk/pc/PCMessageQueue.hpp
+        src/dusk/pc/PCMessageQueue.cpp
+        src/dusk/pc/PCHeap.hpp
         src/dusk/achievements.cpp
         src/dusk/action_bindings.cpp
         src/dusk/action_bindings.h
@@ -1576,6 +1583,40 @@ set(DUSK_FILES
         src/dusk/ui/warp.hpp
         src/dusk/ui/window.cpp
         src/dusk/ui/window.hpp
+        src/dusk/achievements.cpp
+        src/dusk/iso_validate.cpp
+        src/dusk/livesplit.cpp
+        src/dusk/mods/log_buffer.cpp
+        src/dusk/mods/log_buffer.hpp
+        src/dusk/mods/manifest.cpp
+        src/dusk/mods/manifest.hpp
+        src/dusk/mods/loader/bundle_disk.cpp
+        src/dusk/mods/loader/bundle_zip.cpp
+        src/dusk/mods/loader/context.cpp
+        src/dusk/mods/loader/depgraph.cpp
+        src/dusk/mods/loader/depgraph.hpp
+        src/dusk/mods/loader/loader.cpp
+        src/dusk/mods/loader/loader.hpp
+        src/dusk/mods/loader/native_module.cpp
+        src/dusk/mods/loader/native_module.hpp
+        src/dusk/mods/svc/camera.cpp
+        src/dusk/mods/svc/config.cpp
+        src/dusk/mods/svc/config.hpp
+        src/dusk/mods/svc/game.cpp
+        src/dusk/mods/svc/gfx.cpp
+        src/dusk/mods/svc/hook.cpp
+        src/dusk/mods/svc/host.cpp
+        src/dusk/mods/svc/log.cpp
+        src/dusk/mods/svc/overlay.cpp
+        src/dusk/mods/svc/resource.cpp
+        src/dusk/mods/svc/texture.cpp
+        src/dusk/mods/svc/ui.cpp
+        src/dusk/mods/svc/ui.hpp
+        src/dusk/mods/svc/registry.cpp
+        src/dusk/mods/svc/registry.hpp
+        src/dusk/discord.cpp
+        src/dusk/discord.hpp
+        src/dusk/discord_presence.cpp
         src/dusk/update_check.cpp
         src/dusk/update_check.hpp
         src/dusk/version.cpp
