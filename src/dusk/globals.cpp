@@ -5,7 +5,7 @@
 #include "dusk/main.h"
 
 bool dusk::IsRunning = true;
-bool dusk::IsShuttingDown = false;
+std::atomic_bool dusk::IsShuttingDown = false;
 bool dusk::IsGameLaunched = false;
 bool dusk::RestartRequested = false;
 uint8_t dusk::SaveRequested = 0;

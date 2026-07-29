@@ -1414,10 +1414,17 @@ set(DUSK_FILES
         include/helpers/batch.hpp
         include/helpers/endian_gx.hpp
         src/d/actor/d_a_alink_dusk.cpp
-        src/dusk/OSContext.cpp
-        src/dusk/OSMutex.cpp
-        src/dusk/OSReport.cpp
-        src/dusk/OSThread.cpp
+        src/dusk/os/OSContext.cpp
+        src/dusk/os/OSMutex.cpp
+        src/dusk/os/OSReport.cpp
+        src/dusk/os/OSThread.cpp
+        src/dusk/os/OSSideTable.hpp
+        src/dusk/os/reflection.h
+        src/dusk/os/reflection.cpp
+        src/dusk/pc/PCDataRegistry.hpp
+        src/dusk/pc/PCMessageQueue.hpp
+        src/dusk/pc/PCMessageQueue.cpp
+        src/dusk/pc/PCHeap.hpp
         src/dusk/achievements.cpp
         src/dusk/action_bindings.cpp
         src/dusk/action_bindings.h

@@ -95,7 +95,6 @@
 #include "dusk/discord_presence.hpp"
 #include "tracy/Tracy.hpp"
 #include "f_pc/f_pc_draw.h"
-#include "tracy/Tracy.hpp"
 #include <RmlUi/Core.h>
 #ifdef __APPLE__
 #include <TargetConditionals.h>

@@ -25,6 +25,8 @@ orig/*/*
 build/
 .ninja_*
 build.ninja
+cmake-build-*/
+CMakeFiles/
 
 # decompctx output
 ctx.*
@@ -53,3 +55,8 @@ compile_commands.json
 pipeline_cache.bin
 
 extract
+
+# Traces
+traces/
+*.tracy
+*.trace

@@ -89,9 +89,22 @@ typedef struct THPHeader {
 static u32 THPAudioDecode(s16* audioBuffer, u8* audioFrame, s32 flag);
 static s32 __THPAudioGetNewSample(THPAudioDecodeInfo* info);
 static void __THPAudioInitialize(THPAudioDecodeInfo* info, u8* ptr);
+#endif
 
-#define THP_AUDIO_BUFFER_COUNT 3
+/*
+ * All related uses of these values should now be using these 'defines'. Since the compiler actually
+ * inserts the associated value at each usage, we should still get the same compiled output when not
+ * targeting ports. This also gets rid of some of the magic numbers floating around and makes the
+ * code easier to read and reason about.
+ *
+ * - Brenden Davidson
+ */
 #define THP_READ_BUFFER_COUNT  10
+#if TARGET_PC
+#define THP_AUDIO_BUFFER_COUNT 8
+#define THP_TEXTURE_SET_COUNT  8
+#else
+#define THP_AUDIO_BUFFER_COUNT 3
 #define THP_TEXTURE_SET_COUNT  3
 #endif
 
@@ -133,7 +146,7 @@ struct daMP_THPPlayer {
 	/* 0x0F4 */ s32 curAudioNumber;
 	/* 0x0F8 */ THPTextureSet* dispTextureSet;
 	/* 0x0FC */ THPAudioBuffer* playAudioBuffer;
-	/* 0x100 */ daMP_THPReadBuffer readBuffer[10];
+	/* 0x100 */ daMP_THPReadBuffer readBuffer[THP_READ_BUFFER_COUNT];
 	/* 0x000 */ THPTextureSet textureSet[THP_TEXTURE_SET_COUNT];
 	/* 0x000 */ THPAudioBuffer audioBuffer[THP_AUDIO_BUFFER_COUNT];
 };

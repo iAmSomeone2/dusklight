@@ -1,0 +1,6 @@
+# Ignore anything in Aurora
+src:*/extern/aurora/*
+
+# Everything in 'libs' is also currently ignored.
+# JSystem itself is very problematic. It can be cleaned up piecewise later.
+src:*/libs/*

@@ -9,7 +9,7 @@
 
 JAIAudience::~JAIAudience() {
 #if TARGET_PC
-    if (dusk::IsShuttingDown) {
+    if (dusk::IsShuttingDown.load(std::memory_order_acquire)) {
         // Those asserts down there crash on shutdown from dtors.
         return;
     }
