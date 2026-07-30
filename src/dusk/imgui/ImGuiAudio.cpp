@@ -1,8 +1,13 @@
+#include <cmath>
+#include <fmt/format.h>
+#include <set>
+#include <thread>
+
 #include "ImGuiConsole.hpp"
 #include "ImGuiMenuTools.hpp"
-#include <cmath>
-#include "JSystem/JAudio2/JAISeq.h"
+
 #include "JSystem/JAudio2/JAISeMgr.h"
+#include "JSystem/JAudio2/JAISeq.h"
 #include "JSystem/JAudio2/JAISeqMgr.h"
 #include "JSystem/JAudio2/JAIStreamMgr.h"
 #include "JSystem/JAudio2/JASCriticalSection.h"
@@ -181,12 +186,117 @@ static void ShowAllJAIStreams() {
         snprintf(buf, sizeof(buf), "%p", &stream);
 
         if (ImGui::BeginChild(buf, ImVec2(), ImGuiChildFlags_Border | ImGuiChildFlags_AutoResizeY)) {
-            ImGui::Text("[%p]", &stream);
+            ImGui::Text("[%d]", static_cast<u32>(stream.getID()));
             bool paused = stream.status_.field_0x0.flags.paused;
             ImGui::Checkbox("Paused", &paused);
             stream.status_.field_0x0.flags.paused = paused;
         }
 
+        ImGui::EndChild();
+    }
+}
+
+struct BGMStreamInfo {
+    uint32_t id;
+    std::string file_path;
+
+    BGMStreamInfo(const uint32_t stream_id, const char* stream_file_path) : id(stream_id) {
+        if (stream_file_path == nullptr) {
+            throw std::invalid_argument("file_path cannot be nullptr");
+        }
+        this->file_path = stream_file_path;
+    }
+
+    bool operator<(const BGMStreamInfo& other) const noexcept {
+        return this->id < other.id;
+    }
+
+    bool operator==(const BGMStreamInfo& other) const noexcept {
+        // It seems like the game has duplicate names for some IDs, so we can't compare by paths
+        return this->id == other.id;
+    }
+
+    /**
+     * Get the name portion of this stream's file path.
+     * @return
+     */
+    [[nodiscard]] std::string get_file_name() const noexcept {
+        const auto last_slash_pos = this->file_path.find_last_of("/");
+        if (last_slash_pos == std::string::npos) {
+            return "";
+        }
+        return this->file_path.substr(last_slash_pos + 1);
+    }
+
+    /**
+     * Associated struct used for sorting by file name instead of ID.
+     */
+    struct NameComparator {
+        bool operator()(const BGMStreamInfo& a, const BGMStreamInfo& b) const noexcept {
+            return a.get_file_name() < b.get_file_name();
+        }
+    };
+
+    /**
+     * Gets the set of all "stream" type audio assets from the game.
+     * @return the set of located streams, sorted by file path
+     */
+    static const std::set<BGMStreamInfo>& get_stream_set() {
+        static std::set<BGMStreamInfo> stream_set;
+        if (!stream_set.empty()) {
+            return stream_set;
+        }
+        const auto snd_info = Z2GetSoundInfo();
+        for (uint32_t id = 0x2000000; id < 0x20000FF; id++) {
+            if (const auto file_path = snd_info->getStreamFilePath(id); file_path != nullptr) {
+                stream_set.emplace(id, file_path);
+            }
+        }
+        return stream_set;
+    }
+};
+
+
+static std::atomic_int64_t selected_stream = -1;
+static std::mutex bgm_streams_mutex;
+
+static void start_bgm_stream(const uint64_t id) {
+    std::lock_guard lock(bgm_streams_mutex);
+
+    selected_stream.store(id, std::memory_order_relaxed);
+    const auto handle = Z2SeqMgr::getInstance()->getMainBgmHandle();
+    if (const auto cib = handle->getSound(); cib) {
+        cib->stop();
+        handle->releaseSound();
+    }
+
+    Z2SoundMgr::getInstance()->startSound(JAISoundID(id), handle, nullptr);
+    handle->getSound()->fadeIn(10);
+}
+
+static void PlayStreamById() {
+    if (ImGui::BeginChild("stream-player", ImVec2(), ImGuiChildFlags_Border | ImGuiChildFlags_AutoResizeY)) {
+        const bool in_game = Z2GetSceneMgr()->isSceneExist() && Z2GetSceneMgr()->isInGame();
+        ImGui::Text("Play BGM By Path");
+        ImGui::Separator();
+        const auto stream_set = BGMStreamInfo::get_stream_set();
+        if (!in_game) {
+            ImGui::Text("Must be in-game for list to populate.");
+            return;
+        }
+        ImGui::Text("Located %ld streams.", stream_set.size());
+
+        if (ImGui::BeginListBox("stream-list", ImVec2())) {
+            const auto active_id = selected_stream.load(std::memory_order_relaxed);
+            for (const auto& stream_info : stream_set) {
+                std::string btn_label = fmt::format("{:s} [0x{:X}]", stream_info.get_file_name(), stream_info.id);
+                if (ImGui::RadioButton(btn_label.c_str(), active_id == stream_info.id)) {
+                    std::thread t(start_bgm_stream, stream_info.id);
+                    t.detach();
+                }
+            }
+            ImGui::EndListBox();
+        }
         ImGui::EndChild();
     }
 }
@@ -319,6 +429,11 @@ void dusk::ImGuiMenuTools::ShowAudioDebug() {
 
             if (ImGui::BeginTabItem("JAISeq")) {
                 ShowAllJAISeqs();
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Stream Player")) {
+                PlayStreamById();
                 ImGui::EndTabItem();
             }
 
