@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.28)
 
 if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING
@@ -437,6 +437,8 @@ set(GAME_DEBUG_FILES
         src/dusk/audio/Adpcm.cpp
         src/dusk/audio/DspStub.cpp
         src/dusk/imgui/ImGuiAudio.cpp
+        src/dusk/debug/instrument.hpp
+        src/dusk/debug/instrument.cpp
 )
 set_source_files_properties(
         ${GAME_DEBUG_FILES}
@@ -471,7 +473,9 @@ if (CMAKE_CXX_LINK_GROUP_USING_RESCAN_SUPPORTED OR CMAKE_LINK_GROUP_USING_RESCAN
     set(JSYSTEM_LINK_LIBRARIES "$<LINK_GROUP:RESCAN,${JSYSTEM_LIBRARIES}>")
 endif ()
 
-set(DUSK_FILES src/dusk/main.cpp ${GAME_BASE_FILES} ${GAME_DEBUG_FILES} ${miniz_SOURCE_DIR}/miniz.c)
+set(DUSK_FILES src/dusk/main.cpp ${GAME_BASE_FILES} ${GAME_DEBUG_FILES} ${miniz_SOURCE_DIR}/miniz.c
+        src/dusk/debug/TracyBitfield.cpp
+        src/dusk/debug/TracyBitfield.hpp)
 if(ANDROID)
     add_library(dusklight SHARED ${DUSK_FILES})
     set_target_properties(dusklight PROPERTIES OUTPUT_NAME main)

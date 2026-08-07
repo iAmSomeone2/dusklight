@@ -516,6 +516,9 @@ void JASDsp::TChannel::init() {
     mForcedStop = 0;
     mIsActive = 0;
     mAutoMixerBeenSet = 0;
+#if TARGET_PC
+    mSamplesLeft = 0;
+#endif
     mSamplePosition = 0;
     initFilter();
 }

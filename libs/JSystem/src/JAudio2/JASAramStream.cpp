@@ -1,7 +1,8 @@
-#include "JSystem/JSystem.h" // IWYU pragma: keep
+#include "JSystem/JSystem.h"  // IWYU pragma: keep
 
 #include "JSystem/JAudio2/JASAiCtrl.h"
 #include "JSystem/JAudio2/JASAramStream.h"
+
 #include "JSystem/JAudio2/JASAudioThread.h"
 #include "JSystem/JAudio2/JASChannel.h"
 #include "JSystem/JAudio2/JASCriticalSection.h"
@@ -11,6 +12,43 @@
 #include "JSystem/JKernel/JKRAram.h"
 #include "JSystem/JKernel/JKRSolidHeap.h"
 #include "JSystem/JSupport/JSupport.h"
+#include "dusk/debug/instrument.hpp"
+
+#if TARGET_PC
+#if TRACY_ENABLE
+#include <tracy/Tracy.hpp>
+#include "dusk/debug/TracyBitfield.hpp"
+#include "dusk/debug/instrument.hpp"
+
+void ErrorFlag::log_change() const noexcept {
+    if (this->value.load(std::memory_order_acquire)) {
+        TracyMessageLS("hasErrored set to 'true'", 20);
+    } else {
+        TracyMessageLS("hasErrored set to 'false'", 20);
+    }
+}
+#endif
+
+ErrorFlag& ErrorFlag::operator=(const bool v) noexcept {
+    this->value.store(v, std::memory_order_release);
+#if TRACY_ENABLE
+    this->log_change();
+#endif
+    return *this;
+}
+
+ErrorFlag& ErrorFlag::operator=(const int v) noexcept {
+    this->value.store(v != 0, std::memory_order_release);
+#if TRACY_ENABLE
+    this->log_change();
+#endif
+    return *this;
+}
+
+ErrorFlag::operator bool() const noexcept {
+    return this->value.load(std::memory_order_acquire);
+}
+#endif
 
 DUSK_GAME_DATA JASTaskThread* JASAramStream::sLoadThread;
 
@@ -21,22 +59,26 @@ DUSK_GAME_DATA u32 JASAramStream::sBlockSize;
 DUSK_GAME_DATA u32 JASAramStream::sChannelMax;
 
 DUSK_GAME_DATA bool dvdHasErrored;
+#if TARGET_PC
+DUSK_GAME_DATA ErrorFlag hasErrored;
+#else
 DUSK_GAME_DATA bool hasErrored;
+#endif
 
-#define PAUSE_REQUESTED   1
-#define PAUSE_DVD_ERROR   2
-#define PAUSE_UNDERFLOW   4
+#define PAUSE_REQUESTED 1
+#define PAUSE_DVD_ERROR 2
+#define PAUSE_UNDERFLOW 4
 #define PAUSE_OTHER_ERROR 8
 
 // CMDs for mMainCommandQueue.
-#define CMD_START   0
-#define CMD_STOP    1 // upper 16 bits of cmd contain oscillator direct release value.
-#define CMD_PAUSE   2
+#define CMD_START 0
+#define CMD_STOP 1  // upper 16 bits of cmd contain oscillator direct release value.
+#define CMD_PAUSE 2
 #define CMD_UNPAUSE 3
 
 // CMDs for mLoadCommandQueue
 #define CMD_PREPARE_FINISHED 4
-#define CMD_LOOP_END_LOADED  5
+#define CMD_LOOP_END_LOADED 5
 
 void JASAramStream::initSystem(u32 block_size, u32 channel_max) {
     JUT_ASSERT(66, block_size % 32 == 0);
@@ -106,9 +148,17 @@ JASAramStream::JASAramStream() {
     for (int i = 0; i < 6; i++) {
         mMixConfig[i] = 0;
     }
+
+#if TARGET_PC && TRACY_ENABLE
+    this->mPauseFlags.with_flag_name(PAUSE_REQUESTED, "PAUSE_REQUESTED")
+        .with_flag_name(PAUSE_DVD_ERROR, "PAUSE_DVD_ERROR")
+        .with_flag_name(PAUSE_OTHER_ERROR, "PAUSE_OTHER_ERROR")
+        .with_flag_name(PAUSE_UNDERFLOW, "PAUSE_UNDERFLOW");
+#endif
 }
 
-void JASAramStream::init(u32 aramAddress, u32 aramSize, StreamCallback i_callback, void* i_callbackData) {
+void JASAramStream::init(
+    u32 aramAddress, u32 aramSize, StreamCallback i_callback, void* i_callbackData) {
     JUT_ASSERT(153, sReadBuffer != NULL);
     mAramAddress = aramAddress;
     mAramSize = aramSize;
@@ -129,8 +179,10 @@ void JASAramStream::init(u32 aramAddress, u32 aramSize, StreamCallback i_callbac
     mMixConfig[0] = 0xffff;
     mCallback = i_callback;
     mCallbackData = i_callbackData;
-    OSInitMessageQueue(&mMainCommandQueue, mMainCommandQueueArray, ARRAY_SIZEU(mMainCommandQueueArray));
-    OSInitMessageQueue(&mLoadCommandQueue, mLoadCommandQueueArray, ARRAY_SIZEU(mLoadCommandQueueArray));
+    OSInitMessageQueue(
+        &mMainCommandQueue, mMainCommandQueueArray, ARRAY_SIZEU(mMainCommandQueueArray));
+    OSInitMessageQueue(
+        &mLoadCommandQueue, mLoadCommandQueueArray, ARRAY_SIZEU(mLoadCommandQueueArray));
 }
 
 bool JASAramStream::prepare(s32 param_0, int param_1) {
@@ -163,7 +215,9 @@ bool JASAramStream::start() {
 }
 
 bool JASAramStream::stop(u16 directRelease) {
-    if (!OSSendMessage(&mMainCommandQueue, (OSMessage)(uintptr_t)(directRelease << 0x10 | CMD_STOP), OS_MESSAGE_NOBLOCK)) {
+    if (!OSSendMessage(&mMainCommandQueue, (OSMessage)(uintptr_t)(directRelease << 0x10 | CMD_STOP),
+            OS_MESSAGE_NOBLOCK))
+    {
         JUT_WARN(290, "%s", "OSSendMessage Failed");
         return false;
     }
@@ -307,7 +361,6 @@ bool JASAramStream::headerLoad(u32 aramSize, int param_1) {
     return true;
 }
 
-
 bool JASAramStream::load() {
     {
         JASCriticalSection cs;
@@ -345,8 +398,9 @@ bool JASAramStream::load() {
         // Fakematch? It seems the only way to get the bhead->field_0x4 load in the right order is
         // with a pointer cast on its address in one of the two places it is read, but not both.
         if (!JKRMainRamToAram(sReadBuffer + bhead->mSize * i + sizeof(BlockHeader),
-                              blockBaseOffset + sBlockSize * mAramBlocksPerChannel * i,
-                              bhead->mSize, EXPAND_SWITCH_UNKNOWN0, 0, NULL, -1, NULL)) {
+                blockBaseOffset + sBlockSize * mAramBlocksPerChannel * i, bhead->mSize,
+                EXPAND_SWITCH_UNKNOWN0, 0, NULL, -1, NULL))
+        {
             JUT_WARN(522, "%s", "JKRMainRamToAram Failed");
             hasErrored = 1;
             return false;
@@ -411,20 +465,19 @@ s32 JASAramStream::dvdErrorCheck(void* param_0) {
     return 0;
 }
 
-void JASAramStream::channelCallback(u32 i_callbackType, JASChannel* i_channel,
-                                    JASDsp::TChannel* i_dspChannel, void* i_this) {
+void JASAramStream::channelCallback(
+    u32 i_callbackType, JASChannel* i_channel, JASDsp::TChannel* i_dspChannel, void* i_this) {
     JASAramStream* stream = (JASAramStream*)i_this;
     stream->updateChannel(i_callbackType, i_channel, i_dspChannel);
 }
 
 #define CHANNEL_UPDATE_SAMPLES_LEFT 1
-#define CHANNEL_UPDATE_LOOP_START   2
-#define CHANNEL_UPDATE_END_SAMPLE   4
-#define CHANNEL_UPDATE_LOOP_FLAG    8
+#define CHANNEL_UPDATE_LOOP_START 2
+#define CHANNEL_UPDATE_END_SAMPLE 4
+#define CHANNEL_UPDATE_LOOP_FLAG 8
 
-
-void JASAramStream::updateChannel(u32 i_callbackType, JASChannel* i_channel,
-                                  JASDsp::TChannel* i_dspChannel) {
+void JASAramStream::updateChannel(
+    u32 i_callbackType, JASChannel* i_channel, JASDsp::TChannel* i_dspChannel) {
     u32 block_samples = getBlockSamples();
     switch (i_callbackType) {
     case JASChannel::CB_START:
@@ -445,12 +498,14 @@ void JASAramStream::updateChannel(u32 i_callbackType, JASChannel* i_channel,
                 /*
                 if (JASAudioThread::snIntCount == 1) {
                     OSReportForceEnableOn();
-                    OSReport("mSamplesLeft: %08d, mAramStreamPosition: %08d\n", i_dspChannel->mSamplesLeft, i_dspChannel->mAramStreamPosition);
+                    OSReport("mSamplesLeft: %08d, mAramStreamPosition: %08d\n",
+                i_dspChannel->mSamplesLeft, i_dspChannel->mAramStreamPosition);
                 }
                 */
 
                 mChannelUpdateFlags = 0;
-                u32 adjustedSamplesLeft = i_dspChannel->mSamplesLeft + i_dspChannel->mSamplesPerBlock;
+                u32 adjustedSamplesLeft =
+                    i_dspChannel->mSamplesLeft + i_dspChannel->mSamplesPerBlock;
                 if (adjustedSamplesLeft <= mLastSamplesLeft) {
                     mReadSample += mLastSamplesLeft - adjustedSamplesLeft;
                 } else {
@@ -463,14 +518,14 @@ void JASAramStream::updateChannel(u32 i_callbackType, JASChannel* i_channel,
                     } else {
                         // We hit the actual file loop position.
                         mReadSample += mLastSamplesLeft;
-                        mReadSample += block_samples * mBufCount - adjustedSamplesLeft
-                                       - i_dspChannel->mLoopStartSample;
+                        mReadSample += block_samples * mBufCount - adjustedSamplesLeft -
+                                       i_dspChannel->mLoopStartSample;
                         mReadSample -= mLoopEnd;
                         mReadSample += mLoopStart;
                         i_dspChannel->mLoopStartSample = 0;
                         mUpdateLoopStartSample = 0;
                         mChannelUpdateFlags |= CHANNEL_UPDATE_LOOP_START;
-#if !TARGET_PC // The variable assigned here is never used.
+#if !TARGET_PC  // The variable assigned here is never used.
                         if (field_0x0c4 < 0xffffffff) {
                             field_0x0c4 += 1;
                         }
@@ -483,7 +538,7 @@ void JASAramStream::updateChannel(u32 i_callbackType, JASChannel* i_channel,
                     hasErrored = true;
                 }
 
-#if !TARGET_PC // The variable assigned here is never used.
+#if !TARGET_PC  // The variable assigned here is never used.
                 f32 fvar1 = field_0x0c4;
                 fvar1 *= mLoopEnd - mLoopStart;
                 if (field_0x0c4 < 0xffffffff) {
@@ -501,8 +556,8 @@ void JASAramStream::updateChannel(u32 i_callbackType, JASChannel* i_channel,
                         if (uvar5 >= mBufCount) {
                             uvar5 = 0;
                         }
-                        i_dspChannel->mLoopStartSample = mLoopStart % block_samples
-                                                    + uvar5 * block_samples;
+                        i_dspChannel->mLoopStartSample =
+                            mLoopStart % block_samples + uvar5 * block_samples;
                         mUpdateLoopStartSample = i_dspChannel->mLoopStartSample;
                         mChannelUpdateFlags |= CHANNEL_UPDATE_LOOP_START;
                     } else {
@@ -514,7 +569,11 @@ void JASAramStream::updateChannel(u32 i_callbackType, JASChannel* i_channel,
                     }
                     int sp20 = field_0x0bc * block_samples + mLoopEnd % block_samples;
                     i_dspChannel->mSamplesLeft -= block_samples * mBufCount - sp20;
+#if TARGET_PC && TRACY_ENABLE
+                    mUpdateSamplesLeft = static_cast<int32_t>(i_dspChannel->mSamplesLeft);
+#else
                     mUpdateSamplesLeft = i_dspChannel->mSamplesLeft;
+#endif
                     mChannelUpdateFlags |= CHANNEL_UPDATE_SAMPLES_LEFT;
                     field_0x0bc += (mLoopEnd - 1) / block_samples - mLoopStart / block_samples + 1;
                     mEndSetup = true;
@@ -529,7 +588,9 @@ void JASAramStream::updateChannel(u32 i_callbackType, JASChannel* i_channel,
                     bool cmp = blockCount < field_0x0b0;
                     while (blockCount != field_0x0b0) {
                         if (!sLoadThread->sendCmdMsg(loadToAramTask, this)) {
-                            JUT_WARN(741, "sendCmdMsg Failed %d %d (%d %d)", i_dspChannel->mAramStreamPosition, i_channel->mWaveAramAddress, blockCount, field_0x0b0);
+                            JUT_WARN(741, "sendCmdMsg Failed %d %d (%d %d)",
+                                i_dspChannel->mAramStreamPosition, i_channel->mWaveAramAddress,
+                                blockCount, field_0x0b0);
                             hasErrored = true;
                             break;
                         }
@@ -547,7 +608,11 @@ void JASAramStream::updateChannel(u32 i_callbackType, JASChannel* i_channel,
                         if (mLoopEndLoaded) {
                             if (!mEndSetup) {
                                 i_dspChannel->mSamplesLeft += block_samples;
+#if TARGET_PC && TRACY_ENABLE
+                                mUpdateSamplesLeft = static_cast<int32_t>(i_dspChannel->mSamplesLeft);
+#else
                                 mUpdateSamplesLeft = i_dspChannel->mSamplesLeft;
+#endif
                                 mChannelUpdateFlags |= CHANNEL_UPDATE_SAMPLES_LEFT;
                             }
                             i_dspChannel->mEndSample += block_samples;
@@ -639,7 +704,7 @@ s32 JASAramStream::channelProc() {
             break;
         }
     }
-    
+
     if (!mPrepareFinished) {
         return 0;
     }
@@ -681,7 +746,7 @@ s32 JASAramStream::channelProc() {
             channel->setParams(params);
         }
     }
-    
+
     return 0;
 }
 
@@ -732,7 +797,6 @@ void JASAramStream::channelStart() {
     }
     mPrimaryChannel = NULL;
 }
-
 
 void JASAramStream::channelStop(u16 i_directRelease) {
     for (int i = 0; i < mChannelNum; i++) {

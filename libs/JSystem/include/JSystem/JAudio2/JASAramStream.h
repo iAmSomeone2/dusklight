@@ -4,6 +4,11 @@
 #include "JSystem/JAudio2/JASTaskThread.h"
 #include "JSystem/JUtility/JUTAssert.h"
 #include <dvd.h>
+
+#if TARGET_PC && TRACY_ENABLE
+#include "dusk/debug/TracyBitfield.hpp"
+#include "dusk/debug/instrument.hpp"
+#endif
 #include "helpers/endian.h"
 
 class JASChannel;
@@ -14,6 +19,25 @@ namespace JASDsp {
 
 #define STREAM_FORMAT_ADPCM4 0
 #define STREAM_FORMAT_PCM16  1
+
+#if TARGET_PC
+#include <atomic>
+
+struct ErrorFlag {
+    std::atomic_bool value;
+
+    ErrorFlag& operator=(bool v) noexcept;
+
+    ErrorFlag& operator=(int v) noexcept;
+
+    explicit operator bool() const noexcept;
+
+#if TRACY_ENABLE
+private:
+  void log_change() const noexcept;
+#endif
+};
+#endif
 
 /**
  * @ingroup jsystem-jaudio
@@ -183,7 +207,11 @@ public:
     /**
      * Bitflag containing pause reasons/state for the stream.
      */
+#if TARGET_PC && TRACY_ENABLE
+    TracyBitfield mPauseFlags = TracyBitfield("mPauseFlags");
+#else
     /* 0x0AE */ u8 mPauseFlags;
+#endif
     /* 0x0B0 */ int field_0x0b0;
 
     /**
@@ -219,7 +247,11 @@ public:
      */
     /* 0x110 */ u32 mBlock;
     /* 0x114 */ u8 mIsCancelled;
+#if TARGET_PC && TRACY_ENABLE
+    /* 0x118 */ dusk::InstrumentProxy<u32> mPendingLoadTasks = dusk::InstrumentProxy<u32>("mPendingLoadTasks");
+#else
     /* 0x118 */ u32 mPendingLoadTasks;
+#endif
     /* 0x11C */ int mUpdateSamplesLeft;
     /* 0x120 */ int mUpdateLoopStartSample;
     /* 0x124 */ int mUpdateEndSample;
