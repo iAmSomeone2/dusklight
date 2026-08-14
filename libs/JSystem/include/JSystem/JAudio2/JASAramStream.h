@@ -5,10 +5,9 @@
 #include "JSystem/JUtility/JUTAssert.h"
 #include <dvd.h>
 
-#if TARGET_PC && TRACY_ENABLE
-#include "dusk/debug/TracyBitfield.hpp"
-#include "dusk/debug/instrument.hpp"
-#endif
+#include <dusk_debug/TracyBitfield.hpp>
+#include <dusk_debug/instrument.hpp>
+
 #include "helpers/endian.h"
 
 class JASChannel;

@@ -1,0 +1,9 @@
+.cache/
+.claude/
+.github/
+.vscode/
+.idea/
+build/
+cmake-build-*/
+notes/
+orig/

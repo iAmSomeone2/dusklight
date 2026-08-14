@@ -476,7 +476,7 @@ static int ReadChannelSamplesChunk(
     assert(curSamplePosition % channel.mSamplesPerBlock == 0);
     auto dataPosition = ConvertSamplesToDataLength(channel, curSamplePosition);
 
-    u32 renderSamples = std::min(channel.mSamplesLeft, static_cast<u32>(desiredSamples));
+    u32 renderSamples = std::min(0, std::min(static_cast<int32_t>(channel.mSamplesLeft), static_cast<int32_t>(desiredSamples)));
 
     int renderSize = static_cast<int>(sizeof(s16) * renderSamples);
     auto renderData = static_cast<s16*>(alloca(renderSize));
@@ -512,16 +512,18 @@ static int ReadChannelSamplesChunk(
 static void FillDecodeBuf(JASDsp::TChannel& channel, ChannelAuxData& aux, int needed) {
     while (aux.decodeBufCount < needed) {
         if (channel.mSamplesLeft == 0) {
+            TracyMessageL("DuskDsp: channel out of samples");
             if (!channel.mLoopFlag) {
                 // we aren't a looping channel and there's no samples left, we out of this fuckin loop
+                TracyMessageL("DuskDsp: channel stop");
                 break;
-            } else {
-                // we are looping, handle loop logic
-                channel.mSamplesLeft = channel.mEndSample - channel.mLoopStartSample;
-                channel.mSamplePosition = channel.mLoopStartSample;
-                aux.hist1 = channel.mpPenult;
-                aux.hist0 = channel.mpLast;
             }
+            // we are looping, handle loop logic
+            TracyMessageL("DuskDsp: channel loop restart");
+            channel.mSamplesLeft = channel.mEndSample - channel.mLoopStartSample;
+            channel.mSamplePosition = channel.mLoopStartSample;
+            aux.hist1 = channel.mpPenult;
+            aux.hist0 = channel.mpLast;
         }
 
         int remainingDecodeSpace = ChannelAuxData::DECODE_BUF_SIZE - aux.decodeBufCount;

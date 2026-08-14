@@ -284,18 +284,15 @@ static void PlayStreamById() {
             ImGui::Text("Must be in-game for list to populate.");
             return;
         }
-        ImGui::Text("Located %ld streams.", stream_set.size());
 
-        if (ImGui::BeginListBox("stream-list", ImVec2())) {
-            const auto active_id = selected_stream.load(std::memory_order_relaxed);
-            for (const auto& stream_info : stream_set) {
-                std::string btn_label = fmt::format("{:s} [0x{:X}]", stream_info.get_file_name(), stream_info.id);
-                if (ImGui::RadioButton(btn_label.c_str(), active_id == stream_info.id)) {
-                    std::thread t(start_bgm_stream, stream_info.id);
-                    t.detach();
-                }
+        ImGui::Text("Located %ld streams.", stream_set.size());
+        const auto active_id = selected_stream.load(std::memory_order_relaxed);
+        for (const auto& stream_info : stream_set) {
+            std::string btn_label = fmt::format("{:s} [0x{:X}]", stream_info.get_file_name(), stream_info.id);
+            if (ImGui::RadioButton(btn_label.c_str(), active_id == stream_info.id)) {
+                std::thread t(start_bgm_stream, stream_info.id);
+                t.detach();
             }
-            ImGui::EndListBox();
         }
         ImGui::EndChild();
     }

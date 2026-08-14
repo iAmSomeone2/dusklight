@@ -1,8 +1,11 @@
 #include "dusk/audio/DuskAudioSystem.h"
 
+#include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_init.h>
 #include <array>
 #include <cassert>
+#include <iostream>
+#include <ostream>
 #include <span>
 
 #include "JSystem/JAudio2/JASAiCtrl.h"

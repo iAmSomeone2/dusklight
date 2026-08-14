@@ -2,7 +2,8 @@
 // Created by Brenden Davidson on 8/2/26.
 //
 
-#include "instrument.hpp"
+#include "dusk_debug/instrument.hpp"
+#include <condition_variable>
 #include <cstring>
 #include <exception>
 
@@ -34,19 +35,34 @@ int64_t Instrumented::get_plot_value() const noexcept {
     std::terminate();
 }
 
-void Instrumented::report() noexcept {
+void Instrumented::send_report() noexcept {
     assert(this->m_value_ptr != nullptr);
 
     // Skip reporting if value didn't change
     if (memcmp(this->m_value_ptr.get(), this->m_prev_value_ptr.get(), this->m_value_size) == 0) return;
-
     memcpy(this->m_prev_value_ptr.get(), this->m_value_ptr.get(), this->m_value_size);
-    TracyPlot(this->m_name.c_str(), this->get_plot_value());
+    InstrumentManager::instance().submit_report({ .value_name = this->m_name.c_str(), .value = this->get_plot_value() });
 }
 
 // =================
 // InstrumentManager
 // =================
+
+static void change_report_worker(std::stop_token stop_token, std::shared_ptr<PCMessageQueue> message_queue) noexcept {
+    Report report;
+    while (!stop_token.stop_requested()) {
+        message_queue->pop(&msg, true);
+
+    }
+}
+
+InstrumentManager::InstrumentManager() noexcept {
+    this->m_plot_thread = std::jthread(&change_report_worker, this->m_message_queue);
+}
+
+void InstrumentManager::submit_report(Report& report) const noexcept {
+    this->m_message_queue->push(&report, false);
+}
 
 std::optional<uint8_t> InstrumentManager::allocate_u8_proxy() noexcept {
     std::unique_lock lock(this->m_mutex);

@@ -17,7 +17,7 @@
 #if TARGET_PC
 #if TRACY_ENABLE
 #include <tracy/Tracy.hpp>
-#include "dusk/debug/TracyBitfield.hpp"
+#include "../../../../include/dusk/debug/TracyBitfield.hpp"
 #include "dusk/debug/instrument.hpp"
 
 void ErrorFlag::log_change() const noexcept {

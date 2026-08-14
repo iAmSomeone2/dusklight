@@ -18,8 +18,16 @@
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <thread>
+
+#include "dusk_debug/channel.hpp"
 
 namespace dusk {
+
+struct Report {
+    const char* value_name;
+    int64_t value;
+};
 
 /**
  * Value instrumentation
@@ -51,7 +59,7 @@ public:
     ~Instrumented() noexcept;
 
     /// Report this value's current state to Tracy
-    void report() noexcept;
+    void send_report() noexcept;
 
     template <std::integral T>
     struct Handle {
@@ -59,7 +67,7 @@ public:
 
         explicit Handle(std::shared_ptr<Instrumented> instrumented) noexcept : m_instrumented(std::move(instrumented)) {};
 
-        ~Handle() noexcept { this->m_instrumented->report(); }
+        ~Handle() noexcept { this->m_instrumented->send_report(); }
 
         T get_value() const noexcept {
             T value;
@@ -201,7 +209,7 @@ class InstrumentManager {
      * prevent data races. In practice, this single contention point shouldn't cause bottlenecks. It
      * should only be locked on creation or destruction of instrumented values.
      */
-    std::mutex m_mutex;
+    std::mutex m_mutex{};
 
     /**
      * Slots previously allocated which have become free.
@@ -265,8 +273,15 @@ class InstrumentManager {
     /// Interns the given name so that Tracy gets always gets the same address during a run.
     std::string const& intern_name(std::string_view const& name_view) noexcept;
 
+    /// Bounded MPMC queue used to send value updates to the plot thread
+    ///
+    /// Defaults to 10 message capacity
+    std::shared_ptr<Channel<10, int64_t>> m_message_queue = std::make_shared<Channel<10, int64_t>>("ValueQueue");
+
+    /// Background thread used to send updates to Tracy
+    std::jthread m_plot_thread;
 public:
-    InstrumentManager() = default;
+    InstrumentManager() noexcept;
 
     InstrumentManager(InstrumentManager&) = delete;
     InstrumentManager(InstrumentManager&&) = delete;
@@ -275,6 +290,8 @@ public:
 
     /// Gets the singleton instance of InstrumentManager
     static InstrumentManager& instance() noexcept;
+
+    void submit_report(Report& report) const noexcept;
 
     /**
      * Gets a RAII handle for the proxied value.

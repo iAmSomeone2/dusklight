@@ -2,9 +2,9 @@
 // Created by Brenden Davidson on 7/31/26.
 //
 
-#include "TracyBitfield.hpp"
+#include "dusk_debug/TracyBitfield.hpp"
+#include <format>
 #include <sstream>
-#include <fmt/format.h>
 #include <tracy/Tracy.hpp>
 
 void TracyBitfield::update_all_flags() noexcept {
@@ -72,6 +72,6 @@ void TracyBitfield::log_change() const noexcept {
     }
     flag_list << "\t]";
 
-    const std::string log_msg = fmt::format("{} {{\n\tvalue = 0b{:08b}\n{}\n}}", this->name, this->value, flag_list.view());
+    const std::string log_msg = std::format("{} {{\n\tvalue = 0b{:08b}\n{}\n}}", this->name, this->value, flag_list.view());
     TracyMessageS(log_msg.data(), log_msg.size(), 5);
 }

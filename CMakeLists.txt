@@ -94,6 +94,9 @@ option(DUSK_ENABLE_CODE_MODS "Enable code mods" OFF)
 # ThreadSanitizer configuration
 include(cmake/ThreadSanitizer.cmake)
 
+# Dusk debugging and instrumentation tooling
+add_subdirectory("libs/dusk_debug")
+
 set(DUSK_HAS_FUNCHOOK OFF)
 if (DUSK_ENABLE_CODE_MODS AND (NOT APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Darwin"))
     set(DUSK_HAS_FUNCHOOK ON)
@@ -437,8 +440,6 @@ set(GAME_DEBUG_FILES
         src/dusk/audio/Adpcm.cpp
         src/dusk/audio/DspStub.cpp
         src/dusk/imgui/ImGuiAudio.cpp
-        src/dusk/debug/instrument.hpp
-        src/dusk/debug/instrument.cpp
 )
 set_source_files_properties(
         ${GAME_DEBUG_FILES}
@@ -462,7 +463,7 @@ set_source_files_properties(
 
 foreach(jsystem_lib IN LISTS JSYSTEM_LIBRARIES)
     target_compile_definitions(${jsystem_lib} PRIVATE ${GAME_COMPILE_DEFS} $<$<CONFIG:Debug>:DEBUG=1>)
-    target_link_libraries(${jsystem_lib} PRIVATE ${GAME_LIBS})
+    target_link_libraries(${jsystem_lib} PRIVATE ${GAME_LIBS} dusk_debug)
     set_target_properties(${jsystem_lib} PROPERTIES FOLDER "JSystem")
 endforeach()
 
@@ -473,9 +474,7 @@ if (CMAKE_CXX_LINK_GROUP_USING_RESCAN_SUPPORTED OR CMAKE_LINK_GROUP_USING_RESCAN
     set(JSYSTEM_LINK_LIBRARIES "$<LINK_GROUP:RESCAN,${JSYSTEM_LIBRARIES}>")
 endif ()
 
-set(DUSK_FILES src/dusk/main.cpp ${GAME_BASE_FILES} ${GAME_DEBUG_FILES} ${miniz_SOURCE_DIR}/miniz.c
-        src/dusk/debug/TracyBitfield.cpp
-        src/dusk/debug/TracyBitfield.hpp)
+set(DUSK_FILES src/dusk/main.cpp ${GAME_BASE_FILES} ${GAME_DEBUG_FILES} ${miniz_SOURCE_DIR}/miniz.c)
 if(ANDROID)
     add_library(dusklight SHARED ${DUSK_FILES})
     set_target_properties(dusklight PROPERTIES OUTPUT_NAME main)
@@ -488,7 +487,7 @@ endif ()
 
 target_compile_definitions(dusklight PRIVATE ${GAME_COMPILE_DEFS})
 target_include_directories(dusklight PRIVATE ${miniz_SOURCE_DIR})
-target_link_libraries(dusklight PRIVATE aurora::main ${GAME_LIBS} ${JSYSTEM_LINK_LIBRARIES})
+target_link_libraries(dusklight PRIVATE aurora::main dusk_debug ${GAME_LIBS} ${JSYSTEM_LINK_LIBRARIES})
 target_precompile_headers(dusklight PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/include/dusk_pch.hpp>")
 
 if (DUSK_ENABLE_CODE_MODS)
