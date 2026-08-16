@@ -8,7 +8,6 @@ target_sources(dusk_debug
 PRIVATE
         src/instrument.cpp
         src/TracyBitfield.cpp
-        src/Channel.cpp
 PUBLIC
 FILE_SET HEADERS
 BASE_DIRS include
