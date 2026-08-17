@@ -12,13 +12,12 @@
 #include "JSystem/JKernel/JKRAram.h"
 #include "JSystem/JKernel/JKRSolidHeap.h"
 #include "JSystem/JSupport/JSupport.h"
-#include "dusk/debug/instrument.hpp"
 
 #if TARGET_PC
 #if TRACY_ENABLE
 #include <tracy/Tracy.hpp>
-#include "../../../../include/dusk/debug/TracyBitfield.hpp"
-#include "dusk/debug/instrument.hpp"
+#include <dusk_debug/TracyBitfield.hpp>
+#include <dusk_debug/instrument.hpp>
 
 void ErrorFlag::log_change() const noexcept {
     if (this->value.load(std::memory_order_acquire)) {

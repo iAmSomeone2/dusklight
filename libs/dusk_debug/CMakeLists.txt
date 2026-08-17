@@ -2,11 +2,16 @@ cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
 project(dusk_debug LANGUAGES CXX)
 
-add_library(dusk_debug STATIC)
+add_library(dusk_debug STATIC
+        include/dusk_debug/InstrumentManager.hpp
+        include/dusk_debug/Instrumented.hpp
+        src/InstrumentManager.cpp
+        src/PlotNameManager.cpp
+        include/dusk_debug/PlotNameManager.hpp)
 
 target_sources(dusk_debug
 PRIVATE
-        src/instrument.cpp
+        src/Instrumented.cpp
         src/TracyBitfield.cpp
 PUBLIC
 FILE_SET HEADERS

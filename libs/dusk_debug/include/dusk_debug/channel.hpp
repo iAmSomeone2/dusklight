@@ -16,7 +16,9 @@
 #include <format>
 #include <optional>
 #include <string_view>
+#include <string>
 
+#include "dusk_debug/PlotNameManager.hpp"
 #include <tracy/Tracy.hpp>
 
 namespace dusk {
@@ -161,13 +163,9 @@ class Channel {
     bool m_report_enabled;
 
     /// This Channel's static Tracy reporting strings
-    ///
-    /// \remarks Currently these are not held static for the life of the program as Tracy would
-    /// prefer. This has the possibility of creating conflicting reports if a Channel is destroyed
-    /// and another with the same name is created.
-    std::array<char, detail::T_NAME_LEN + 1> m_name{};
-    std::array<char, detail::T_PLOT_NAME_LEN + 1> m_drop_plot_name{};
-    std::array<char, detail::T_PLOT_NAME_LEN + 1> m_enqueue_plot_name{};
+    std::shared_ptr<std::string> m_name;
+    std::shared_ptr<std::string> m_drop_plot_name;
+    std::shared_ptr<std::string> m_enqueue_plot_name;
 
     void init_arena() noexcept {
         for (size_t i = 0; i < CAPACITY; i++) {
@@ -191,7 +189,7 @@ class Channel {
         const auto drop_count =
             static_cast<int64_t>(this->m_dropped.fetch_add(1, std::memory_order_relaxed) + 1);
         if (this->m_report_enabled) {
-            TracyPlot(this->m_drop_plot_name.data(), drop_count);
+            TracyPlot(this->m_drop_plot_name->c_str(), drop_count);
         }
     }
 
@@ -216,27 +214,24 @@ protected:
         : m_report_enabled(enable_reporting) {
         this->init_arena();
 
+        auto& plot_name_man = PlotNameManager::instance();
+
         // Populate the 'm_name' field
-        const auto name_len = std::min(name.size(), this->m_name.size() - 1);
-        strncpy(this->m_name.data(), name.data(), name_len);
+        this->m_name = plot_name_man.intern_name(name);
 
         // Populate the plot names
-        strncpy(this->m_drop_plot_name.data(), this->m_name.data(), name_len);
-        strncpy(this->m_enqueue_plot_name.data(), this->m_name.data(), name_len);
-
-        const auto cpy_len = detail::T_PLOT_NAME_LEN - name_len;
-        strncpy(this->m_drop_plot_name.data() + name_len, ": Dropped", cpy_len);
-        strncpy(this->m_enqueue_plot_name.data() + name_len, ": Enqueued", cpy_len);
+        this->m_drop_plot_name = plot_name_man.intern_name(std::format("{}: Dropped", *this->m_name));
+        this->m_enqueue_plot_name = plot_name_man.intern_name(std::format("{}: Enqueued", *this->m_name));
 
         // Init plots
         if (this->m_report_enabled) {
-            const auto info_msg = std::format("{}: Created", this->m_name.data());
+            const auto info_msg = std::format("{}: Created", *this->m_name);
             TracyMessage(info_msg.data(), info_msg.size());
 
             TracyPlotConfig(
-                this->m_drop_plot_name.data(), tracy::PlotFormatType::Number, false, true, 0);
+                this->m_drop_plot_name->c_str(), tracy::PlotFormatType::Number, false, true, 0);
             TracyPlotConfig(
-                this->m_enqueue_plot_name.data(), tracy::PlotFormatType::Number, false, true, 0);
+                this->m_enqueue_plot_name->c_str(), tracy::PlotFormatType::Number, false, true, 0);
         }
     }
 
@@ -323,9 +318,6 @@ protected:
             this->m_wait_count.fetch_add(1, std::memory_order_release);
         msg.set_payload(std::move(payload));
 
-        if (this->m_report_enabled)
-            this->report_queue_length();
-
         // Return now if not waiting.
         if (!await_recv)
             return;
@@ -388,7 +380,10 @@ protected:
             }
         }
 
-        return this->get_message(est_pos).consume();
+        const auto payload = this->get_message(est_pos).consume();
+        if (this->m_report_enabled)
+            this->report_queue_length();
+        return payload;
     }
 
     void inc_sender_count() noexcept {
@@ -405,7 +400,7 @@ protected:
             if (did_set_state && this->m_report_enabled) {
                 const auto info_msg =
                     std::format("{}: All senders disconnected. State changed to 'DrainOnly'.",
-                        this->m_name.data());
+                        *this->m_name);
                 TracyMessage(info_msg.data(), info_msg.size());
             }
         }
@@ -440,7 +435,7 @@ protected:
                 if (this->m_report_enabled) {
                     const auto info_msg =
                     std::format("{}: All receivers disconnected. State changed to 'Closed'",
-                        this->m_name.data());
+                        *this->m_name);
                     TracyMessage(info_msg.data(), info_msg.size());
                 }
 
@@ -467,7 +462,7 @@ public:
 
 
         if (this->m_report_enabled) {
-            const auto info_msg = std::format("{}: Destroyed", this->m_name.data());
+            const auto info_msg = std::format("{}: Destroyed", *this->m_name);
             TracyMessage(info_msg.data(), info_msg.size());
         }
     }
@@ -508,6 +503,12 @@ public:
     public:
         Sender() = delete;
         Sender(Sender&&) = default;
+
+        Sender& operator=(Sender&& other) noexcept {
+            this->m_channel_ptr = std::move(other.m_channel_ptr);
+            return *this;
+        };
+        // Sender& operator=(const Sender&) = default;
 
         /*
          * Since constructing, copying, and destructing Senders should never be in hot code paths,
@@ -590,6 +591,6 @@ template <size_t CAPACITY, std::movable T>
 void Channel<CAPACITY, T>::report_queue_length() const noexcept {
     [[maybe_unused]]
     const auto len = static_cast<int64_t>(this->est_length());
-    TracyPlot(this->m_enqueue_plot_name.data(), len);
+    TracyPlot(this->m_enqueue_plot_name->c_str(), len);
 }
 }  // namespace dusk
