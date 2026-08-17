@@ -5,8 +5,10 @@
 #include "JSystem/JUtility/JUTAssert.h"
 #include <dvd.h>
 
+#if TRACY_ENABLE && TARGET_PC
 #include <dusk_debug/TracyBitfield.hpp>
 #include <dusk_debug/instrument.hpp>
+#endif
 
 #include "helpers/endian.h"
 

@@ -5,17 +5,6 @@
 #include "JSystem/JAudio2/JASAramStream.h"
 #include "JSystem/JSupport/JSUList.h"
 
-// #if TARGET_PC && TRACY_ENABLE
-// #include "dusk/debug/instrument.hpp"
-//
-// template <>
-// inline void dusk::debug::InstrumentedObject<JASAramStream>::configure() noexcept {
-//     this->track_int<uint32_t>(TracedIntField<uint32_t>::TracedIntConfig("mPendingLoadTasks",  this->m_obj.mPendingLoadTasks));
-// }
-//
-// using InstrumentedJASAramStream = dusk::debug::InstrumentedObject<JASAramStream>;
-// #endif
-
 class JAIStreamMgr;
 
 /**

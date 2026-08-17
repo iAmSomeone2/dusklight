@@ -105,7 +105,7 @@ void SDLCALL GetNewAudio(
     int) {
     FrameMarkStart(FrameName);
     while (needed > 0) {
-        const int rendered = RenderNewAudioFrame();
+        const int rendered = RenderNewAudioFrame() * static_cast<int>(OutputSubframe::NUM_CHANNELS * sizeof(f32));
         needed -= rendered;
     }
     FrameMarkEnd(FrameName);

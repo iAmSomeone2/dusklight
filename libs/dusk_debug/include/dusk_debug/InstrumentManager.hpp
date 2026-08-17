@@ -70,42 +70,42 @@ public:
     T operator++(int) noexcept {
         Instrumented::Handle<T> handle = get_handle();
         T old_val = handle.get_value();
-        handle.set_value(old_val += 1);
+        handle.set_value(old_val + 1);
         return old_val;
     }
 
     T operator++() noexcept {
         Instrumented::Handle<T> handle = get_handle();
         T old_val = handle.get_value();
-        handle.set_value(old_val += 1);
+        handle.set_value(old_val + 1);
         return handle.get_value();
     }
 
     T operator--(int) noexcept {
         Instrumented::Handle<T> handle = get_handle();
         T old_val = handle.get_value();
-        handle.set_value(old_val -= 1);
+        handle.set_value(old_val - 1);
         return old_val;
     }
 
     T operator--() noexcept {
         Instrumented::Handle<T> handle = get_handle();
         T old_val = handle.get_value();
-        handle.set_value(old_val -= 1);
+        handle.set_value(old_val - 1);
         return handle.get_value();
     }
 
     InstrumentProxy& operator+=(const T other) noexcept {
         Instrumented::Handle<T> handle = get_handle();
         T old_val = handle.get_value();
-        handle.set_value(old_val += other);
+        handle.set_value(old_val + other);
         return *this;
     }
 
     InstrumentProxy& operator-=(const T other) noexcept {
         Instrumented::Handle<T> handle = get_handle();
         T old_val = handle.get_value();
-        handle.set_value(old_val -= other);
+        handle.set_value(old_val - other);
         return *this;
     }
 
