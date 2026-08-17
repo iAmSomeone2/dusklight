@@ -476,9 +476,9 @@ static int ReadChannelSamplesChunk(
     assert(curSamplePosition % channel.mSamplesPerBlock == 0);
     auto dataPosition = ConvertSamplesToDataLength(channel, curSamplePosition);
 
-    u32 renderSamples = std::min(0, std::min(static_cast<int32_t>(channel.mSamplesLeft), static_cast<int32_t>(desiredSamples)));
+    const u32 renderSamples = std::max(0, std::min(static_cast<int32_t>(channel.mSamplesLeft), static_cast<int32_t>(desiredSamples)));
 
-    int renderSize = static_cast<int>(sizeof(s16) * renderSamples);
+    const int renderSize = static_cast<int>(sizeof(s16) * renderSamples);
     auto renderData = static_cast<s16*>(alloca(renderSize));
     memset(renderData, 0, renderSize);
 
