@@ -440,6 +440,17 @@ void JASDsp::initBuffer() {
 #else
     JASCalc::bzero(CH_BUF, sizeof(TChannel) * DSP_CHANNELS);
     JASCalc::bzero(FX_BUF, sizeof(FxBuf) * 4);
+#if TRACY_ENABLE
+    auto message = std::format("DSP Channel 0 is at {:p}", reinterpret_cast<void*>(CH_BUF));
+    TracyMessage(message.c_str(), message.length());
+    for (size_t i = 0; i < DSP_CHANNELS; ++i) {
+        auto channel = CH_BUF + i;
+        message = std::format("Channel {:d} is at {:p}", i, reinterpret_cast<void*>(channel));
+        TracyMessage(message.c_str(), message.length());
+        dusk::InstrumentProxy<u32>::restore(reinterpret_cast<u32*>(&channel->mSamplesLeft));
+        channel->mSamplesLeft = 0;
+    }
+#endif
 #endif
 
     for (u8 i = 0; i < 4; i++) {

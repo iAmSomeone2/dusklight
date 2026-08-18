@@ -17,7 +17,7 @@ std::optional<size_t> InstrumentTable::p_allocate_proxy(Instrumented&& instrumen
 
     // Grab index of first available slot
     // Array only has 256 values, so even a naïve search will be fast enough.
-    for (size_t i = 0; i < this->m_instrumented_vals.size(); ++i) {
+    for (size_t i = 0; i < TABLE_CAP; ++i) {
         if (!this->m_instrumented_vals[i].has_value()) {
             this->m_instrumented_vals[i] = std::move(instrumented);
             return { i };
@@ -34,6 +34,10 @@ void InstrumentTable::deallocate_proxy(const size_t proxy_idx) noexcept {
 std::optional<Instrumented>& InstrumentTable::operator[](const size_t index) noexcept {
     assert(index < TABLE_CAP);
     return this->m_instrumented_vals[index];
+}
+
+bool InstrumentTable::is_allocated(const size_t index) const noexcept {
+    return this->m_instrumented_vals[index].has_value();
 }
 
 /**

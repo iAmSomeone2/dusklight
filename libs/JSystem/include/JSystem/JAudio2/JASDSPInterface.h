@@ -4,6 +4,10 @@
 #include <cstdint>
 #include <types.h>
 
+#if TARGET_PC && TRACY_ENABLE
+#include <dusk_debug/instrument.hpp>
+#endif
+
 /**
  * Amount of separate audio channels (i.e. individual playbacks, voices) the DSP can mix at once.
  */
@@ -150,7 +154,11 @@ namespace JASDsp {
          * Amount of (decoded) audio samples left until the end of the buffer.
          * Gets written by DSP, but also CPU.
          */
+#if TRACY_ENABLE && TARGET_PC
+        dusk::InstrumentProxy<u32> mSamplesLeft = dusk::InstrumentProxy<u32>("mSamplesLeft");
+#else
         /* 0x074 */ u32 mSamplesLeft;      // Never directly cleared to zero. Seems sus. Cleared by DSP?
+#endif
         /* 0x078 */ short field_0x078[4];  // Only cleared to zero, presumed used by DSP.
         /* 0x080 */ short field_0x080[20]; // Only cleared to zero, presumed used by DSP.
         /* 0x0A8 */ short field_0x0a8[4];  // Only cleared to zero, presumed used by DSP.

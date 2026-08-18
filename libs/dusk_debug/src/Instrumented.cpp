@@ -17,4 +17,6 @@ void Instrumented::send_report() noexcept {
     InstrumentManager::instance().submit_report({ .value_name = this->m_name->c_str(), .value = this->m_value });
 }
 
-
+std::uintptr_t Instrumented::get_proxy_address() const noexcept {
+    return this->m_proxy_address;
+}

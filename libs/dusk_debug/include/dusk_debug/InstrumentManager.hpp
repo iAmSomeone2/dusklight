@@ -65,7 +65,15 @@ public:
         return static_cast<uint32_t>(this->m_index);
     }
 
-    explicit operator T() noexcept { return this->get_handle().get_value(); }
+    /**
+     * Try to restore a proxy using its index
+     *
+     * @param proxied_val
+     * @return
+     */
+    static void restore(T* proxied_val);
+
+    operator T() noexcept { return this->get_handle().get_value(); }
 
     T operator++(int) noexcept {
         Instrumented::Handle<T> handle = get_handle();
@@ -166,6 +174,8 @@ public:
     void deallocate_proxy(size_t proxy_idx) noexcept;
 
     std::optional<Instrumented>& operator[](size_t index) noexcept;
+
+    [[nodiscard]] bool is_allocated(size_t index) const noexcept;
 };
 }  // namespace detail
 
@@ -260,25 +270,27 @@ public:
      * number (>256) of proxies for a given bit-width (1, 2, or 4-byte).
      *
      * @tparam T type of value being proxied
+     * @param proxy_addr address where the proxy lives
      * @param debug_name static name used in debug tooling
      * @param initial_value initial stored value
      * @return newly registered lookup index
      * @throws ProxyAllocError if the given type's table is full and cannot allocate another proxy
      */
     template <std::integral T>
-    T register_proxy(std::string_view const& debug_name, T initial_value = 0) {
+    T register_proxy(const std::uintptr_t proxy_addr, std::string_view const& debug_name, T initial_value = 0) {
         constexpr size_t size_of_t = sizeof(T);
         static_assert(size_of_t <= sizeof(uint32_t), "Invalid type size");
 
-        const auto& name = PlotNameManager::instance().intern_name(debug_name);
+        const auto& name = PlotNameManager::instance().intern_name(std::format("{} [0x{:X}]", debug_name, proxy_addr));
         // Get the appropriate index for the value's type.
         // Assertions are used to immediately panic if we run out of indices.
         auto& table = select_table<T>();
         std::optional<T> out_idx =
-            table.template allocate_proxy<T>(Instrumented{initial_value, name});
+            table.template allocate_proxy<T>(Instrumented{initial_value, name, proxy_addr});
 
         if (!out_idx.has_value()) {
-            throw ProxyAllocError(std::format("failed to allocate {:d}-byte proxy \"{}\"", size_of_t, *name));
+            throw ProxyAllocError(
+                std::format("failed to allocate {:d}-byte proxy \"{}\"", size_of_t, *name));
         }
 
         return out_idx.value();
@@ -296,16 +308,48 @@ public:
         const auto proxy_idx = proxy.get_index();
         table.deallocate_proxy(proxy_idx);
     }
+
+    template <std::integral T>
+    [[nodiscard]] bool index_is_allocated(const size_t index) noexcept {
+        auto& table = select_table<T>();
+        return table.is_allocated(index);
+    }
+
+    template <std::integral T>
+    [[nodiscard]] std::optional<size_t> locate_proxy_index(const std::uintptr_t proxy_addr) noexcept {
+        auto& table = select_table<T>();
+        for (auto i = 0; i < detail::TABLE_CAP; ++i) {
+            const auto instrument_slot = table[i];
+            if (instrument_slot.has_value() && instrument_slot.value().get_proxy_address() == proxy_addr) {
+                return { i };
+            }
+        }
+
+        return { std::nullopt };
+    }
 };
 
 template <std::integral T>
 InstrumentProxy<T>::InstrumentProxy(std::string_view const& debug_name, T initial_val) noexcept {
-    this->m_index = InstrumentManager::instance().register_proxy<T>(debug_name, initial_val);
+    const auto proxy_addr = reinterpret_cast<std::uintptr_t>(this);
+    this->m_index = InstrumentManager::instance().register_proxy<T>(proxy_addr, debug_name, initial_val);
 }
 
 template <std::integral T>
 InstrumentProxy<T>::~InstrumentProxy() noexcept {
     InstrumentManager::instance().unregister_proxy(*this);
+}
+
+template <std::integral T>
+void InstrumentProxy<T>::restore(T* proxied_val) {
+    const auto proxy_addr = reinterpret_cast<std::uintptr_t>(proxied_val);
+    const auto proxy_idx = InstrumentManager::instance().locate_proxy_index<T>(proxy_addr);
+    if (proxy_idx.has_value()) {
+        *proxied_val = proxy_idx.value();
+    } else {
+        throw std::runtime_error(
+            std::format("no registered {:d}-byte proxy for value at [0x{:X}]", sizeof(T), proxy_addr));
+    }
 }
 
 template <std::integral T>

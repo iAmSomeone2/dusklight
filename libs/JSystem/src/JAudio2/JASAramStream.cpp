@@ -360,6 +360,12 @@ bool JASAramStream::headerLoad(u32 aramSize, int param_1) {
     return true;
 }
 
+#if TRACY_ENABLE
+#include <chrono>
+#include <thread>
+#define INDUCE_WAIT 1
+#endif
+
 bool JASAramStream::load() {
     {
         JASCriticalSection cs;
@@ -386,6 +392,10 @@ bool JASAramStream::load() {
         hasErrored = true;
         return false;
     }
+#ifdef INDUCE_WAIT
+    static constexpr std::chrono::milliseconds sleep_time{800};
+    std::this_thread::sleep_for(sleep_time);
+#endif
     BlockHeader* bhead = (BlockHeader*)sReadBuffer;
     JUT_ASSERT(512, bhead->tag == 'BLCK');
     if (mIsCancelled != 0) {
@@ -514,6 +524,7 @@ void JASAramStream::updateChannel(
                         // Just looping the ring buffer, data continues as normal.
                         mReadSample += mLastSamplesLeft;
                         mReadSample += block_samples * mBufCount - adjustedSamplesLeft;
+                        TracyMessageL("JASChannel: looping ring buffer");
                     } else {
                         // We hit the actual file loop position.
                         mReadSample += mLastSamplesLeft;
@@ -524,6 +535,7 @@ void JASAramStream::updateChannel(
                         i_dspChannel->mLoopStartSample = 0;
                         mUpdateLoopStartSample = 0;
                         mChannelUpdateFlags |= CHANNEL_UPDATE_LOOP_START;
+                        TracyMessageL("JASChannel: looping file");
 #if !TARGET_PC  // The variable assigned here is never used.
                         if (field_0x0c4 < 0xffffffff) {
                             field_0x0c4 += 1;

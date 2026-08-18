@@ -219,6 +219,7 @@ public:
      * (adjusted) value of mSamplesLeft on the primary channel last subframe.
      * Used to calculate how many samples have been read and determine when the DSP looped.
      */
+
     /* 0x0B4 */ int mLastSamplesLeft;
 
     /**
