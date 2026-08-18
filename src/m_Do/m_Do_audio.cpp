@@ -12,10 +12,17 @@
 #include "d/d_debug_viewer.h"
 #include "m_Do/m_Do_Reset.h"
 #include "m_Do/m_Do_dvd_thread.h"
-#include "tracy/Tracy.hpp"
+#include <tracy/Tracy.hpp>
 
 #if TARGET_PC
 #include "dusk/settings.h"
+#endif
+
+#if TRACY_ENABLE
+#define INDUCE_WAIT 1
+#include <thread>
+#include <chrono>
+#include "JSystem/JAudio2/JASCriticalSection.h"
 #endif
 
 #if PLATFORM_WII || PLATFORM_SHIELD
@@ -201,6 +208,12 @@ void mDoAud_Execute() {
             g_mDoAud_zelAudio.setOutputMode(l_outputMode[g_mDoAud_zelAudio.getMode()]);
         }
         dDbVw_Report(20, 30, "%s", l_outputModeName[g_mDoAud_zelAudio.getMode()]);
+#endif
+#if INDUCE_WAIT
+        {
+            JASCriticalSection _wait_section;
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        }
 #endif
         g_mDoAud_zelAudio.gframeProcess();
 #if DEBUG
