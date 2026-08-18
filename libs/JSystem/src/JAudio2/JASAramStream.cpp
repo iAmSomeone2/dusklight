@@ -363,7 +363,7 @@ bool JASAramStream::headerLoad(u32 aramSize, int param_1) {
 #if TRACY_ENABLE
 #include <chrono>
 #include <thread>
-#define INDUCE_WAIT 1
+#define INDUCE_WAIT 0
 #endif
 
 bool JASAramStream::load() {
@@ -392,7 +392,7 @@ bool JASAramStream::load() {
         hasErrored = true;
         return false;
     }
-#ifdef INDUCE_WAIT
+#if INDUCE_WAIT
     static constexpr std::chrono::milliseconds sleep_time{800};
     std::this_thread::sleep_for(sleep_time);
 #endif

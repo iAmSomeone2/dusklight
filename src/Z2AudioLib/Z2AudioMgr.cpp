@@ -92,8 +92,8 @@ void Z2AudioMgr::init(JKRSolidHeap* heap, u32 memSize, void* baaData, JKRArchive
 
     JAIStreamMgr* streamMgr = mSoundMgr.getStreamMgr();
     JAUStreamStaticAramMgr_<1>* streamStaticAramMgr = JKR_NEW_ARGS(heap, 0) JAUStreamStaticAramMgr_<1>();
-    // streamStaticAramMgr->reserveAram(NULL, 0, 0x14);
-    streamStaticAramMgr->reserveAram(NULL, 0, 0x0A); // <- Halve the reservation for underflow testing
+    streamStaticAramMgr->reserveAram(NULL, 0, 0x14);
+    // streamStaticAramMgr->reserveAram(NULL, 0, 0x0A); // <- Halve the reservation for underflow testing
     streamMgr->setStreamAramMgr(streamStaticAramMgr);
     streamMgr->getParams()->moveVolume(Z2Param::VOL_BGM_DEFAULT, 0);
 
